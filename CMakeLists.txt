@@ -20,6 +20,11 @@ target_include_directories(opendisplay-list-displays PRIVATE src)
 target_compile_definitions(opendisplay-list-displays PRIVATE UNICODE _UNICODE WIN32_LEAN_AND_MEAN NOMINMAX)
 target_link_libraries(opendisplay-list-displays PRIVATE user32)
 
+add_library(opendisplay-native SHARED src/web/NativeBridge.cpp src/display/DisplayCatalog.cpp src/input/InputInjector.cpp)
+target_include_directories(opendisplay-native PRIVATE src)
+target_compile_definitions(opendisplay-native PRIVATE UNICODE _UNICODE WIN32_LEAN_AND_MEAN NOMINMAX)
+target_link_libraries(opendisplay-native PRIVATE user32)
+
 if(BUILD_TESTING)
   add_executable(web-core-tests tests/web_core_tests.cpp)
   target_include_directories(web-core-tests PRIVATE src)

@@ -9,3 +9,9 @@ CMakeUserPresets.json
 __pycache__/
 *.pyc
 *.h264
+**/bin/
+**/obj/
+*.pfx
+*.key
+host-data/
+host-data-test/
