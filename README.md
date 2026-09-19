@@ -1,5 +1,10 @@
 # opendisplay-win
 
+> **Fork development:** IP-based PWA support (Pen Tablet, Mirror, Extend) is
+> under development. This is not a working web release yet. See
+> [WEB-DEVELOPMENT.md](WEB-DEVELOPMENT.md) for implemented foundations, tests,
+> and remaining integration work. The native sender described below is retained.
+
 Use an iPad as a wireless second monitor for **Windows**, driving the
 **unmodified** [OpenDisplay](https://github.com/peetzweg/opendisplay) receiver
 app on the iPad. OpenDisplay ships a macOS sender only; this project

@@ -94,6 +94,7 @@ void InputInjector::HandleScroll(const ScrollMsg& scroll)
 
 InputInjector::~InputInjector()
 {
+    EndSession();
     if (penDevice_ != nullptr)
         DestroySyntheticPointerDevice(penDevice_);
 }
@@ -207,6 +208,11 @@ void InputInjector::HandlePencil(const PencilMsg& pencil)
 
 void InputInjector::EndSession()
 {
+    // Finger-as-mouse must also be released if a peer disappears mid-drag.
+    if (isDown_) {
+        SendMouseInput(MOUSEEVENTF_LEFTUP);
+        isDown_ = false;
+    }
     if (penDevice_ == nullptr)
         return;
 

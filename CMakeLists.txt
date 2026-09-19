@@ -1,6 +1,8 @@
 cmake_minimum_required(VERSION 3.20)
 project(opendisplay-win CXX)
 
+include(CTest)
+
 if(NOT WIN32)
   message(FATAL_ERROR "opendisplay-win only builds on Windows (Media Foundation, DXGI, Win32).")
 endif()
@@ -12,6 +14,17 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 # Redistributable installed. Costs ~250 KB; the UCRT part (api-ms-win-crt-*)
 # ships with Windows 10/11 either way.
 set(CMAKE_MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
+
+add_executable(opendisplay-list-displays tools/list_displays.cpp src/display/DisplayCatalog.cpp)
+target_include_directories(opendisplay-list-displays PRIVATE src)
+target_compile_definitions(opendisplay-list-displays PRIVATE UNICODE _UNICODE WIN32_LEAN_AND_MEAN NOMINMAX)
+target_link_libraries(opendisplay-list-displays PRIVATE user32)
+
+if(BUILD_TESTING)
+  add_executable(web-core-tests tests/web_core_tests.cpp)
+  target_include_directories(web-core-tests PRIVATE src)
+  add_test(NAME web-core COMMAND web-core-tests)
+endif()
 
 add_executable(opendisplay-win
   src/main.cpp
