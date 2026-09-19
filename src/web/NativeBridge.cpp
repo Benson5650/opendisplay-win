@@ -1,4 +1,6 @@
 #include "PenTabletSession.h"
+#include "VideoPipeline.h"
+#include "display/VirtualDisplay.h"
 #include "display/DisplayCatalog.h"
 #include "input/InputInjector.h"
 #include <memory>
@@ -110,4 +112,74 @@ API int od_sample(void* handle, uint64_t generation, uint64_t sequence, int phas
 API uint64_t od_emitted(void* handle) noexcept
 {
     return handle ? static_cast<Bridge*>(handle)->emitted : 0;
+}
+
+// Video handles are owned by one authenticated control session. Creation only
+// accepts a catalog identity; a caller cannot pass an arbitrary GDI source name.
+API void* od_video_create(const wchar_t* id, unsigned fps) noexcept
+{
+    if (!id || !*id || (fps != 30 && fps != 60)) return nullptr;
+    try {
+        for (const auto& display : od::EnumerateDisplays()) {
+            if (display.id != id) continue;
+            auto video = std::make_unique<od::web::VideoPipeline>();
+            video->Start(display.deviceName, fps);
+            return video.release();
+        }
+    } catch (...) {}
+    return nullptr;
+}
+API void od_video_destroy(void* handle) noexcept
+{
+    delete static_cast<od::web::VideoPipeline*>(handle);
+}
+
+// Caller owns this display until video capture is fully stopped and input is
+// released. No automatic HKLM writes or UAC from a web request.
+API void* od_extend_create(unsigned width, unsigned height, wchar_t* id, int capacity) noexcept
+{
+    if (!id || capacity < 2 || width < 640 || height < 480 || width > 4096 || height > 4096 || width % 2 || height % 2)
+        return nullptr;
+    try {
+        auto display = std::make_unique<od::VirtualDisplay>();
+        display->SetIdentity("web-extend");
+        if (!display->Open() || !display->EnsureResolution(width, height, 60, false)) return nullptr;
+        for (const auto& candidate : od::EnumerateDisplays()) {
+            if (candidate.deviceName != display->DeviceName()) continue;
+            if (candidate.id.size() >= static_cast<size_t>(capacity)) return nullptr;
+            wcscpy_s(id, capacity, candidate.id.c_str());
+            return display.release();
+        }
+    } catch (...) {}
+    return nullptr;
+}
+API void od_extend_destroy(void* handle) noexcept
+{
+    delete static_cast<od::VirtualDisplay*>(handle);
+}
+API int od_video_state(void* handle, unsigned* width, unsigned* height) noexcept
+{
+    if (!handle || !width || !height) return -1;
+    const auto& video = *static_cast<od::web::VideoPipeline*>(handle);
+    *width = video.Width(); *height = video.Height();
+    return video.State();
+}
+API void od_video_keyframe(void* handle) noexcept
+{
+    if (handle) static_cast<od::web::VideoPipeline*>(handle)->RequestKeyFrame();
+}
+// Returns access-unit length; 0 means no frame, -1 insufficient buffer.
+// A discarded oversized access unit requests decoder recovery automatically.
+API int od_video_take(void* handle, unsigned char* buffer, int capacity, int* key) noexcept
+{
+    if (!handle || !buffer || capacity <= 0 || !key) return -1;
+    auto& video = *static_cast<od::web::VideoPipeline*>(handle);
+    auto frame = video.Take();
+    if (!frame) return 0;
+    if (frame->annexB.size() > static_cast<size_t>(capacity)) {
+        video.RequestKeyFrame(); return -1;
+    }
+    memcpy(buffer, frame->annexB.data(), frame->annexB.size());
+    *key = frame->isKeyFrame ? 1 : 0;
+    return static_cast<int>(frame->annexB.size());
 }

@@ -41,7 +41,7 @@ public:
     // (re)adds the virtual display and attaches/resizes it to exactly that
     // mode. Safe to call again with new dimensions (rotation) — removes and
     // re-adds the display so the driver re-reads the registry.
-    bool EnsureResolution(uint32_t width, uint32_t height, uint32_t hz = 60);
+    bool EnsureResolution(uint32_t width, uint32_t height, uint32_t hz = 60, bool allowRegistration = true);
 
     // Rect of the virtual monitor within the Windows virtual desktop
     // (SM_XVIRTUALSCREEN-relative), valid after a successful EnsureResolution().

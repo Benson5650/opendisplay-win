@@ -11,10 +11,10 @@ const host=spawn('dotnet',[resolve(root,'web-host/bin/Release/net10.0-windows/Op
 let log='',errors='',checks=0;
 host.stdout.on('data',d=>log+=d.toString());host.stderr.on('data',d=>errors+=d.toString());
 const delay=ms=>new Promise(r=>setTimeout(r,ms));
-function check(value,label){assert.ok(value,label);checks++;}
+function check(value,label){assert.ok(value,label);checks++;console.log('PASS',label);}
 async function waitFor(test,label){for(let i=0;i<100;i++){if(test())return;await delay(50);}throw Error(label);}
 const post=(path,value,headers={})=>fetch(origin+path,{method:'POST',headers:{Origin:origin,'Content-Type':'application/json',...headers},body:JSON.stringify(value)});
-let ws;
+let ws, video, keepalive;
 try {
   await waitFor(()=>/Pairing code: ([A-F0-9]+)/.test(log),'host startup');
   const code=log.match(/Pairing code: ([A-F0-9]+)/)[1];
@@ -55,11 +55,47 @@ try {
   ws.send({type:'start',target:displays[0].id,width:1000,height:750,mapping:'stretch'});
   const restarted=await ws.next(m=>m.type==='started');check(restarted.generation!==started.generation,'restart rotates generation');
   ws.send({...event,sequence:3});check((await ws.next(m=>m.type==='sample')).accepted===0,'old mapping rejected');
+  if(process.env.OD_TEST_MIRROR==='1'||process.env.OD_TEST_EXTEND==='1') {
+    const extend=process.env.OD_TEST_EXTEND==='1';
+    ws.send({type:'start',mode:extend?'extend':'mirror',panelWidth:2360,panelHeight:1640,fps:30,target:extend?'':displays[0].id,width:1000,height:750,mapping:'preserve'});
+    const mirrored=await ws.next(m=>m.type==='started');
+    check(mirrored.generation>0&&mirrored.videoTicket,'mirror started with ticket');
+    keepalive=setInterval(()=>ws.send({type:'heartbeat',generation:mirrored.generation}),500);
+    await assert.rejects(connect(origin.replace('https','wss')+'/video?ticket=wrong',{Origin:origin,Cookie:authCookie}));checks++;
+    video=await connect(origin.replace('https','wss')+'/video?ticket='+mirrored.videoTicket,{Origin:origin,Cookie:authCookie});
+    await assert.rejects(connect(origin.replace('https','wss')+'/video?ticket='+mirrored.videoTicket,{Origin:origin,Cookie:authCookie}));checks++;
+    const {parsePacket,codecFromAnnexB}=await import('../web-host/wwwroot/video.mjs');
+    let first=await video.next(m=>m.type==='binary');
+    let bytes=first.data;
+    let frame=parsePacket(bytes.buffer.slice(bytes.byteOffset,bytes.byteOffset+bytes.length),mirrored.generation);
+    check(frame?.key&&codecFromAnnexB(frame.data),'first frame is decodable IDR with SPS');
+    check(frame.width===(extend?2360:displays[0].width)&&frame.height===(extend?1640:displays[0].height),'capture matches input target');
+    ws.send({type:'keyframe',generation:mirrored.generation});
+    let sawKey=false;
+    for(let i=0;i<60&&!sawKey;i++) {
+      bytes=(await video.next(m=>m.type==='binary')).data;
+      frame=parsePacket(bytes.buffer.slice(bytes.byteOffset,bytes.byteOffset+bytes.length),mirrored.generation);
+      sawKey=frame.key;
+    }
+    check(sawKey,'keyframe recovery');
+    ws.send({type:'stop'});await ws.next(m=>m.type==='stopped');
+    clearInterval(keepalive);video.close();video=undefined;
+    await assert.rejects(connect(origin.replace('https','wss')+'/video?ticket='+mirrored.videoTicket,{Origin:origin,Cookie:authCookie}));checks++;
+    if(extend){
+      let restored=false;
+      for(let i=0;i<50&&!restored;i++){
+        const current=await (await fetch(origin+'/displays',{headers:{Cookie:authCookie}})).json();
+        restored=current.length===displays.length&&current.every(d=>displays.some(old=>old.id===d.id));
+        if(!restored)await delay(100);
+      }
+      check(restored,'Extend teardown restores original active displays');
+    }
+  }
   host.stdin.write('revoke\n');await delay(300);
   check((await fetch(origin+'/displays',{headers:{Cookie:authCookie}})).status===401,'revocation');
   console.log(`${checks} HTTPS/WSS/native integration checks passed (dry run)`);
 } finally {
-  ws?.close();host.stdin.write('quit\n');
+  clearInterval(keepalive);video?.close();ws?.close();host.stdin.write('quit\n');
   await Promise.race([new Promise(r=>host.once('exit',r)),delay(3000)]);
   if(host.exitCode===null)host.kill();
   if(errors)console.error('Host stderr:',errors); // Never print stdout containing credentials.

@@ -3,6 +3,12 @@
 <body><main>
 <header><span class="badge">OpenDisplay Web · Preview</span><h1>把 iPad 變成手寫板</h1><p id="status" role="status">請先配對 Windows 主機。</p></header>
 <section id="pairing"><label>主機顯示的配對碼 <input id="code" autocomplete="off" maxlength="12" spellcheck="false"></label><button id="pair">配對</button><p>輸入後，需在 Windows 主機輸入 approve 確認。重新啟動主機須重新配對。</p></section>
-<section id="settings" hidden><label>控制的 Windows 螢幕 <select id="target"><option value="">請選擇螢幕</option></select></label><label>映射方式 <select id="mapping"><option value="preserve">保持比例（建議）</option><option value="stretch">使用整個表面（拉伸）</option></select></label><button id="start">開始純手寫</button><button id="refresh">重新整理螢幕</button><p>僅 Apple Pencil；手指不會控制 Windows。Mirror／Extend 尚未開放。</p></section>
+<section id="settings" hidden>
+<label>模式 <select id="mode"><option value="pen">Pen Tablet · 純手寫</option><option value="mirror">Mirror · 鏡像既有螢幕</option><option value="extend">Extend · 新增延伸螢幕</option></select></label>
+<label id="targetField">控制的 Windows 螢幕 <select id="target"><option value="">請選擇螢幕</option></select></label>
+<div id="panelFields" hidden><label>延伸螢幕寬度（像素）<input id="panelWidth" type="number" min="640" max="4096" step="2" value="2360"></label><label>延伸螢幕高度（像素）<input id="panelHeight" type="number" min="480" max="4096" step="2" value="1640"></label><p>此解析度必須先在 Windows 註冊。不是瀏覽器視窗大小；橫直向請自行交換寬高。</p></div>
+<label>映射方式 <select id="mapping"><option value="preserve">保持比例（建議）</option><option value="stretch">使用整個表面（拉伸）</option></select></label>
+<label id="fpsField" hidden>影片幀率 <select id="fps"><option value="30">30 FPS</option><option value="60">60 FPS</option></select></label>
+<button id="start">開始</button><button id="refresh">重新整理螢幕</button><p>目前僅 Apple Pencil；手指不會控制 Windows。切換模式前請先停止。</p></section>
 <section id="tablet" hidden><div class="toolbar"><span id="destination"></span><button id="stop">停止</button></div><div id="surface"><div id="activeArea"></div><span class="hint">看著電腦螢幕，在這裡書寫<br>不傳送桌面影像，也不顯示本地筆跡</span></div></section>
-</main><script src="/app.js" defer></script></body></html>
+</main><script type="module" src="/app.js"></script></body></html>

@@ -20,10 +20,12 @@ target_include_directories(opendisplay-list-displays PRIVATE src)
 target_compile_definitions(opendisplay-list-displays PRIVATE UNICODE _UNICODE WIN32_LEAN_AND_MEAN NOMINMAX)
 target_link_libraries(opendisplay-list-displays PRIVATE user32)
 
-add_library(opendisplay-native SHARED src/web/NativeBridge.cpp src/display/DisplayCatalog.cpp src/input/InputInjector.cpp)
-target_include_directories(opendisplay-native PRIVATE src)
+add_library(opendisplay-native SHARED src/web/NativeBridge.cpp src/web/VideoPipeline.cpp
+  src/display/DesktopDuplication.cpp src/encode/H264Encoder.cpp src/encode/AnnexB.cpp
+  src/display/DisplayCatalog.cpp src/display/VirtualDisplay.cpp src/app/Log.cpp src/input/InputInjector.cpp)
+target_include_directories(opendisplay-native PRIVATE src third_party/parsec-vdd)
 target_compile_definitions(opendisplay-native PRIVATE UNICODE _UNICODE WIN32_LEAN_AND_MEAN NOMINMAX)
-target_link_libraries(opendisplay-native PRIVATE user32)
+target_link_libraries(opendisplay-native PRIVATE user32 d3d11 dxgi dxguid mfplat mf mfreadwrite mfuuid setupapi cfgmgr32 shell32)
 
 if(BUILD_TESTING)
   add_executable(web-core-tests tests/web_core_tests.cpp)

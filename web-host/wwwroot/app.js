@@ -1,7 +1,19 @@
 'use strict';
+import {VideoReceiver} from './video.mjs';
+let videoSocket, videoReceiver;
 const $ = id => document.getElementById(id);
 let socket, generation = 0, sequence = 0, pointer = null, wakeLock, displays = [], heartbeat, ticketTimer;
 const status = text => { $('status').textContent = text; };
+function updateMode() {
+  const mode=$('mode').value;
+  $('targetField').hidden=mode==='extend';
+  $('panelFields').hidden=mode!=='extend';
+  $('fpsField').hidden=mode==='pen';
+  $('mapping').disabled=mode!=='pen';
+  if(mode!=='pen')$('mapping').value='preserve';
+}
+$('mode').onchange=updateMode;
+updateMode();
 async function post(path, value) {
   const r = await fetch(path, {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(value)});
   if (!r.ok) throw new Error(`請求失敗 (${r.status})，請檢查主機配對狀態。`);
@@ -36,6 +48,10 @@ function send(m) {
   socket.send(JSON.stringify(m)); return true;
 }
 function stop(message = '已停止。可重新選擇螢幕。') {
+  videoReceiver?.close(); videoReceiver=undefined;
+  const oldVideo=videoSocket;videoSocket=undefined;oldVideo?.close();
+  document.getElementById('videoCanvas')?.remove();
+  document.querySelector('.hint').hidden=false;
   generation = 0; pointer = null; clearInterval(heartbeat);
   if (socket?.readyState === WebSocket.OPEN) socket.send(JSON.stringify({type:'stop'}));
   socket?.close(); socket = undefined;
@@ -44,11 +60,18 @@ function stop(message = '已停止。可重新選擇螢幕。') {
   $('start').disabled = false; status(message);
 }
 $('start').onclick = async () => {
-  const display = displays.find(d=>d.id === $('target').value);
+  const mode=$('mode').value;
+  if(mode!=='pen'&&!('VideoDecoder' in window)){status('此瀏覽器不支援 WebCodecs VideoDecoder。');return;}
+  if(mode!=='pen')$('mapping').value='preserve';
+  const panelWidth=Number($('panelWidth').value),panelHeight=Number($('panelHeight').value);
+  if(mode==='extend'&&(!Number.isInteger(panelWidth)||!Number.isInteger(panelHeight)||panelWidth<640||panelHeight<480||panelWidth>4096||panelHeight>4096||panelWidth%2||panelHeight%2)){
+    status('Extend 解析度須為偶數，寬 640–4096、高 480–4096。');return;
+  }
+  const display = mode==='extend'?{id:'',name:'新的延伸螢幕',width:panelWidth,height:panelHeight}:displays.find(d=>d.id === $('target').value);
   if (!display) { status('請先選擇目標螢幕。'); return; }
   $('start').disabled = true; $('tablet').hidden = false;
   document.body.classList.add('writing');
-  $('destination').textContent = `Pen Tablet → ${display.name}`;
+  $('destination').textContent = `${mode==='extend'?'Extend':mode==='mirror'?'Mirror':'Pen Tablet'} → ${display.name}`;
   const surface = $('surface').getBoundingClientRect();
   let width=surface.width, height=surface.height;
   if ($('mapping').value === 'preserve') {
@@ -57,15 +80,27 @@ $('start').onclick = async () => {
   }
   Object.assign($('activeArea').style,{width:`${width}px`,height:`${height}px`,left:`${(surface.width-width)/2}px`,top:`${(surface.height-height)/2}px`});
   const ws = new WebSocket(`${location.origin.replace('https:', 'wss:')}/control`); socket = ws;
-  ws.onopen = () => send({type:'start',target:display.id,width:surface.width,height:surface.height,mapping:$('mapping').value});
+  ws.onopen = () => send({type:'start',mode,panelWidth,panelHeight,fps:Number($('fps').value),target:display.id,width:surface.width,height:surface.height,mapping:$('mapping').value});
   ws.onmessage = e => {
     if (socket !== ws) return;
     const m = JSON.parse(e.data);
     if (m.type === 'hello' && m.dryRun) $('destination').textContent += ' · 測試模式（不注入）';
     if (m.type === 'started') {
-      if (!m.generation) { stop('目標螢幕或映射無效。'); return; }
+      if (!m.generation) { stop(m.error==='EXTEND_UNAVAILABLE_REGISTER_RESOLUTION_LOCALLY'?'Extend 無法建立：請先在 Windows 註冊此解析度並確認 Parsec 驅動。':'目標螢幕或映射無效。'); return; }
       generation=m.generation; sequence=0;
       heartbeat=setInterval(()=>send({type:'heartbeat',generation}),500);
+      if(m.videoTicket){
+        const canvas=document.createElement('canvas');canvas.id='videoCanvas';
+        Object.assign(canvas.style,{position:'absolute',pointerEvents:'none',width:`${width}px`,height:`${height}px`,left:`${(surface.width-width)/2}px`,top:`${(surface.height-height)/2}px`});
+        $('surface').prepend(canvas);document.querySelector('.hint').hidden=true;
+        const receiver=new VideoReceiver(canvas,generation,()=>send({type:'keyframe',generation}),message=>stop(message));
+        videoReceiver=receiver;
+        const vs=new WebSocket(`${location.origin.replace('https:','wss:')}/video?ticket=${encodeURIComponent(m.videoTicket)}`);
+        videoSocket=vs;vs.binaryType='arraybuffer';
+        vs.onmessage=event=>{if(videoSocket===vs)receiver.receive(event.data);};
+        vs.onerror=()=>{if(videoSocket===vs)stop('影片連線失敗。');};
+        vs.onclose=()=>{if(videoSocket===vs)stop('影片已中斷，輸入已停止。');};
+      }
     }
     if (m.type === 'state' && m.state >= 2) stop('螢幕已變更或連線逾時，請重新選擇。');
     if (m.type === 'heartbeat' && !m.alive) stop('工作階段失效，請重新開始。');

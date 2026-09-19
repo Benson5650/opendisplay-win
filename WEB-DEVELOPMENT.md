@@ -1,7 +1,7 @@
 # OpenDisplay Web for Windows — development status
 
-This fork is a work in progress. Pen Tablet now has an HTTPS/WSS host and PWA;
-Mirror/Extend video is not integrated yet. Actual iPad/Pencil acceptance remains
+This fork is a work in progress. Pen Tablet, Mirror, and Extend have an HTTPS/WSS
+host and PWA. Actual browser visual and iPad/Pencil acceptance remains
 pending. The installed native application is not replaced by development builds.
 
 ## Implemented foundation
@@ -41,9 +41,13 @@ mode switches or automatically redirect input after a target disappears.
    PWA on iPad hardware. No capture/encoder/VDD initialization in Pen Tablet mode.
 2. Add durable per-device credentials and individual revocation. Current preview
    pairing is intentionally memory-only and must repeat after a host restart.
-3. Mirror the explicitly selected display; add WebCodecs capability negotiation,
-   complete H.264 access units, bounded queues, IDR recovery and letterbox mapping.
-4. Add Extend via existing Parsec VDD and regression-test native pv3 transport.
+3. Validate Mirror in a real browser: explicit display selection, complete H.264
+   access units, WebCodecs, bounded queues, IDR recovery and letterbox mapping are
+   implemented. Loopback integration verifies actual capture and H.264 transport,
+   not visual decoding quality or Pencil alignment.
+4. Extend is connected through existing Parsec VDD. Loopback tests create a
+   registered 2360x1640 monitor, receive H.264, then verify restoration of the
+   original active-display identities. Native pv3 runtime regression remains.
 
 Web connections use an explicit IP, never .local/mDNS. The TLS certificate must
 contain the chosen IP in SAN. An IP change requires certificate reissuance and
@@ -97,6 +101,15 @@ $env:NODE_EXTRA_CA_CERTS = (Resolve-Path ./host-data-test/ipad-trust.pem).Path
 node tests/web_host_test.mjs
 ```
 
+Set `OD_TEST_MIRROR=1` to additionally capture the first active display over
+loopback (memory only, no saved frames) and check the video ticket, IDR/SPS,
+geometry, keyframe request, and ticket invalidation. Input remains dry-run.
+Run `node tests/video_packet_test.mjs` and `node tests/video_receiver_test.mjs`
+for packet and simulated decoder lifecycle tests. These do not prove Safari
+hardware decoding. Mirror currently preserves aspect ratio and captures native
+resolution at 30/60 FPS; unsupported codec/size fails rather than silently
+changing the target. Resolution scaling and HDR handling remain pending.
+
 Re-use the test certificates on subsequent runs. The test creates and shuts down
 a loopback-only dry-run host and exercises actual TLS, WSS and native mapping.
 
@@ -104,3 +117,23 @@ Hardware acceptance remains pending: mixed-DPI/negative-origin displays, iPad
 orientation and app backgrounding, actual Pencil pressure/tilt/hover capabilities,
 Windows Ink apps, and recovery without stuck input. Core tests use a fake sink:
 they do not inject input into the user's desktop or prove device compatibility.
+
+## Extend prerequisites and verification
+
+The PWA accepts explicit even panel dimensions (width 640–4096, height 480–4096).
+It does not infer native panel resolution from CSS viewport/DPR. The web host
+never elevates or registers display modes. If a size is unavailable, register it
+locally with the native executable's `--register-resolution <width> <height>`
+command using administrator approval. Keep the web host un-elevated.
+
+`OD_TEST_EXTEND=1` runs the integration test against the existing registered
+2360x1640 mode. This temporarily changes desktop topology; do not run while a
+critical display task is active. Current observed result: 31 integration checks
+passed, including IDR/SPS, geometry and restored original active displays.
+`OD_TEST_MIRROR=1` observed 30 checks passed. Both use dry-run input, trusted TLS,
+and loopback video only. Neither test validates Safari rendering or pen accuracy.
+
+Unfinished product features remain explicitly out of the current preview:
+durable pairing/individual revocation, QR onboarding, tray UI, optional finger
+mouse input, resolution scaling/quality presets, automatic rotation restart,
+display-identify overlay and installer packaging. Do not call this a finished V1.

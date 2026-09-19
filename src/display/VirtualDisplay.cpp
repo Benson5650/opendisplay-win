@@ -362,7 +362,7 @@ bool VirtualDisplay::SelfElevateRegister(uint32_t width, uint32_t height)
     return code == 0 && IsResolutionRegistered(width, height);
 }
 
-bool VirtualDisplay::EnsureResolution(uint32_t width, uint32_t height, uint32_t hz)
+bool VirtualDisplay::EnsureResolution(uint32_t width, uint32_t height, uint32_t hz, bool allowRegistration)
 {
     if (!IsOpen())
         return false;
@@ -387,6 +387,9 @@ bool VirtualDisplay::EnsureResolution(uint32_t width, uint32_t height, uint32_t 
     // elevate a one-off. A known iPad is already registered, so this is a
     // one-time UAC prompt the first time a new panel size is seen.
     if (!IsResolutionRegistered(width, height)) {
+        // Web-host DLL callers must never self-elevate dotnet.exe or write HKLM.
+        // Register supported panel sizes explicitly using the native CLI first.
+        if (!allowRegistration) return false;
         if (!RegisterResolutions(width, height) && !SelfElevateRegister(width, height)) {
             Logf(identity_, "resolution %ux%u not registered (needs admin once; UAC declined?)\n", width, height);
             return false;

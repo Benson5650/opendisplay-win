@@ -24,6 +24,8 @@ var gate = new object();
 var native = Native.od_create(dryRun ? 1 : 0);
 if (native == 0) throw new InvalidOperationException("Native initialization failed");
 string? owner = null;
+VideoSession? video = null;
+void CancelVideo() { video?.Cancel(); }
 var tokens = new HashSet<string>();
 var code = Convert.ToHexString(RandomNumberGenerator.GetBytes(6));
 var codeExpires = DateTimeOffset.UtcNow.AddMinutes(5);
@@ -50,7 +52,7 @@ _ = Task.Run(() => {
                     Console.WriteLine($"Pairing code: {code}");
                     break;
                 case "revoke":
-                    tokens.Clear(); Native.od_stop(native); Console.WriteLine("All device sessions revoked.");
+                    tokens.Clear(); Native.od_stop(native); CancelVideo(); Console.WriteLine("All device sessions revoked.");
                     break;
                 case "quit": app.Lifetime.StopApplication(); return;
             }
@@ -65,7 +67,7 @@ app.Use(async (c, next) => {
     c.Response.Headers["X-Content-Type-Options"] = "nosniff";
     c.Response.Headers["Content-Security-Policy"] = "default-src 'self'; script-src 'self'; style-src 'self'; connect-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'self'";
     if (!string.Equals(c.Request.Host.Value, host, StringComparison.OrdinalIgnoreCase)) { c.Response.StatusCode = 400; return; }
-    if ((c.Request.Method != "GET" || c.Request.Path == "/control") && c.Request.Headers.Origin != origin) {
+    if ((c.Request.Method != "GET" || c.Request.Path == "/control" || c.Request.Path == "/video") && c.Request.Headers.Origin != origin) {
         c.Response.StatusCode = 403; return;
     }
     await next();
@@ -118,6 +120,7 @@ app.Map("/control", async (HttpContext c) => {
         if (owner != null) { c.Response.StatusCode = 409; return; }
         owner = connection;
     }
+    var ownedVideos = new List<VideoSession>();
     try {
         using var socket = await c.WebSockets.AcceptWebSocketAsync();
         using var shutdown = CancellationTokenSource.CreateLinkedTokenSource(c.RequestAborted, app.Lifetime.ApplicationStopping);
@@ -136,8 +139,9 @@ app.Map("/control", async (HttpContext c) => {
                 while (await timer.WaitForNextTickAsync(ct)) {
                     int state;
                     lock (gate) {
-                        if (!Auth(c)) { Native.od_stop(native); shutdown.Cancel(); socket.Abort(); return; }
+                        if (!Auth(c)) { Native.od_stop(native); CancelVideo(); shutdown.Cancel(); socket.Abort(); return; }
                         state = Native.od_tick(native);
+                        if (state != 1) CancelVideo();
                     }
                     if (state != previous) { previous = state; await Send(new { type = "state", state }); }
                 }
@@ -162,13 +166,42 @@ app.Map("/control", async (HttpContext c) => {
                     if (!Auth(c)) break;
                     switch (type) {
                         case "start":
+                            Native.od_stop(native); CancelVideo(); video = null;
                             var width = m.GetProperty("width").GetDouble(); var height = m.GetProperty("height").GetDouble();
                             var mapping = m.GetProperty("mapping").GetString();
+                            var mode = m.TryGetProperty("mode", out var modeValue) ? modeValue.GetString() : "pen";
+                            if (mode is not ("pen" or "mirror" or "extend")) throw new JsonException("Unsupported mode");
+                            if (mode != "pen" && mapping != "preserve") throw new JsonException("Video requires aspect preservation");
+                            var fps = m.TryGetProperty("fps", out var fpsValue) ? fpsValue.GetUInt32() : 30;
+                            if (fps is not (30 or 60)) throw new JsonException("Unsupported frame rate");
                             if (width is <= 0 or > 16384 || height is <= 0 or > 16384 || mapping is not ("preserve" or "stretch")) throw new JsonException();
-                            var generation = Native.od_start(native, m.GetProperty("target").GetString() ?? "", width, height, mapping == "stretch" ? 1 : 0);
-                            response = new { type = "started", generation, error = generation == 0 ? "TARGET_OR_MAPPING_INVALID" : null };
+                            var target = m.GetProperty("target").GetString() ?? "";
+                            nint ownedDisplay = 0;
+                            if (mode == "extend") {
+                                var panelWidth = m.GetProperty("panelWidth").GetUInt32();
+                                var panelHeight = m.GetProperty("panelHeight").GetUInt32();
+                                var identity = new StringBuilder(4096);
+                                ownedDisplay = Native.od_extend_create(panelWidth, panelHeight, identity, identity.Capacity);
+                                if (ownedDisplay == 0) {
+                                    response = new { type = "started", generation = 0, error = "EXTEND_UNAVAILABLE_REGISTER_RESOLUTION_LOCALLY" };
+                                    break;
+                                }
+                                target = identity.ToString();
+                            }
+                            try {
+                            var generation = Native.od_start(native, target, width, height, mapping == "stretch" ? 1 : 0);
+                            if (generation != 0 && mode != "pen") {
+                                video = new VideoSession(target, fps, generation, c.Request.Cookies["od-device"]!, ownedDisplay);
+                                ownedDisplay = 0;
+                                ownedVideos.Add(video);
+                            }
+                            response = new { type = "started", generation, videoTicket = video?.Ticket, error = generation == 0 ? "TARGET_OR_MAPPING_INVALID" : null };
+                            } finally { if (ownedDisplay != 0) Native.od_extend_destroy(ownedDisplay); }
                             break;
-                        case "stop": Native.od_stop(native); response = new { type = "stopped" }; break;
+                        case "stop": Native.od_stop(native); CancelVideo(); response = new { type = "stopped" }; break;
+                        case "keyframe":
+                            if (video?.Generation == m.GetProperty("generation").GetUInt64()) video.RequestKeyFrame();
+                            response = new { type = "keyframe" }; break;
                         case "heartbeat":
                             var alive = Native.od_heartbeat(native, m.GetProperty("generation").GetUInt64());
                             response = new { type = "heartbeat", alive }; break;
@@ -184,13 +217,37 @@ app.Map("/control", async (HttpContext c) => {
                 await Send(response);
             }
         } catch (Exception e) when (e is JsonException or InvalidOperationException or KeyNotFoundException or FormatException or WebSocketException or OperationCanceledException) {
+            Console.Error.WriteLine($"Control ended: {e.GetType().Name}");
             // Malformed or lost connections always release input in finally.
         } finally {
             shutdown.Cancel(); socket.Abort();
             try { await watchdog; } catch (OperationCanceledException) {}
             sendLock.Dispose();
         }
-    } finally { lock (gate) { Native.od_stop(native); owner = null; } }
+    } finally {
+        lock (gate) { Native.od_stop(native); CancelVideo(); video = null; owner = null; }
+        foreach (var oldVideo in ownedVideos) oldVideo.Dispose();
+    }
+});
+app.Map("/video", async (HttpContext c) => {
+    if (!Auth(c)) { c.Response.StatusCode = 401; return; }
+    if (!c.WebSockets.IsWebSocketRequest) { c.Response.StatusCode = 400; return; }
+    VideoSession selected;
+    lock (gate) {
+        if (owner == null || video == null || video.DeviceToken != c.Request.Cookies["od-device"] ||
+            video.Ticket != c.Request.Query["ticket"] || !video.Attach()) { c.Response.StatusCode = 403; return; }
+        selected = video;
+    }
+    try {
+        using var socket = await c.WebSockets.AcceptWebSocketAsync();
+        await selected.Stream(socket, c.RequestAborted);
+    } catch (Exception e) when (e is OperationCanceledException or WebSocketException or InvalidOperationException) {
+        // A failed video connection invalidates input for this generation only.
+    } finally {
+        lock (gate) {
+            if (ReferenceEquals(video, selected)) { Native.od_stop(native); selected.Cancel(); }
+        }
+    }
 });
 try { await app.RunAsync(); }
 finally { lock (gate) { disposed = true; Native.od_destroy(native); } cert.Dispose(); }

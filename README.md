@@ -2,7 +2,8 @@
 
 > **Fork development:** IP-based PWA support (Pen Tablet, Mirror, Extend) is
 > under development. An experimental Pen Tablet HTTPS/PWA host is implemented;
-> Mirror/Extend web video and iPad hardware acceptance are still pending. See
+> Mirror/Extend web video is implemented and loopback-tested; browser visual and
+> iPad hardware acceptance are still pending. See
 > [WEB-DEVELOPMENT.md](WEB-DEVELOPMENT.md) for implemented foundations, tests,
 > and remaining integration work. The native sender described below is retained.
 

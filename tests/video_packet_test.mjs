@@ -1,0 +1,16 @@
+import assert from 'node:assert/strict';
+import {parsePacket,codecFromAnnexB} from '../web-host/wwwroot/video.mjs';
+const b=new ArrayBuffer(40),v=new DataView(b);
+v.setBigUint64(0,7n,true);v.setBigUint64(8,1000n,true);
+v.setUint32(16,1920,true);v.setUint32(20,1080,true);v.setUint32(24,1,true);v.setUint32(28,8,true);
+new Uint8Array(b,32).set([0,0,0,1,0x67,0x64,0,0x28]);
+assert.equal(parsePacket(b,6),null);
+assert.equal(parsePacket(b,7).width,1920);
+assert.equal(codecFromAnnexB(parsePacket(b,7).data),'avc1.640028');
+assert.equal(codecFromAnnexB(new Uint8Array([0,0,1,9])),null);
+assert.throws(()=>parsePacket(new ArrayBuffer(12),7));
+v.setUint32(28,9,true);assert.throws(()=>parsePacket(b,7));v.setUint32(28,8,true);
+v.setUint32(16,1919,true);assert.throws(()=>parsePacket(b,7));v.setUint32(16,1920,true);
+v.setUint32(24,2,true);assert.throws(()=>parsePacket(b,7));v.setUint32(24,1,true);
+v.setBigUint64(8,BigInt(Number.MAX_SAFE_INTEGER)+1n,true);assert.throws(()=>parsePacket(b,7));
+console.log('9 video packet checks passed');

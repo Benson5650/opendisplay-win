@@ -8,7 +8,7 @@ export async function connect(url,headers){
   let resolveOpen,rejectOpen;
   const ready=new Promise((r,j)=>{resolveOpen=r;rejectOpen=j;});
   function dispatch(m){messages.push(m);waiter?.();}
-  socket.on('secureConnect',()=>socket.write(`GET ${u.pathname} HTTP/1.1\r\nHost: ${u.host}\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Key: ${key}\r\nSec-WebSocket-Version: 13\r\n${Object.entries(headers).map(([k,v])=>`${k}: ${v}\r\n`).join('')}\r\n`));
+  socket.on('secureConnect',()=>socket.write(`GET ${u.pathname}${u.search} HTTP/1.1\r\nHost: ${u.host}\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Key: ${key}\r\nSec-WebSocket-Version: 13\r\n${Object.entries(headers).map(([k,v])=>`${k}: ${v}\r\n`).join('')}\r\n`));
   socket.on('error',rejectOpen);
   socket.on('data',chunk=>{
     buffer=Buffer.concat([buffer,chunk]);
@@ -20,9 +20,10 @@ export async function connect(url,headers){
       buffer=buffer.subarray(end+4);upgraded=true;resolveOpen();
     }
     while(buffer.length>=2){let n=buffer[1]&127,offset=2;if(n===126){if(buffer.length<4)return;n=buffer.readUInt16BE(2);offset=4;}
-      if(n===127){socket.destroy();return;}if(buffer.length<offset+n)return;
+      else if(n===127){if(buffer.length<10)return;const big=buffer.readBigUInt64BE(2);if(big>9000000n){socket.destroy();return;}n=Number(big);offset=10;}if(buffer.length<offset+n)return;
       const opcode=buffer[0]&15,payload=buffer.subarray(offset,offset+n);buffer=buffer.subarray(offset+n);
       if(opcode===1)dispatch(JSON.parse(payload.toString()));
+      if(opcode===2)dispatch({type:'binary',data:Buffer.from(payload)});
     }
   });
   await ready;
