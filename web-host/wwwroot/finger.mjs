@@ -42,7 +42,13 @@ export class FingerController {
   move(id,x,y,time){
     const contact=this.contacts.get(id);if(!contact)return false;
     if(this.mode==='touch'){
-      contact.moved ||= Math.hypot(x-contact.startX,y-contact.startY)>TAP_DISTANCE;
+      if(!contact.moved){
+        if(Math.hypot(x-contact.startX,y-contact.startY)>6){
+          contact.moved=true;
+        }else{
+          return true;
+        }
+      }
       contact.x=x;contact.y=y;
       this.emit({type:'directTouch',contactId:contact.contactId,phase:1,x,y});return true;
     }

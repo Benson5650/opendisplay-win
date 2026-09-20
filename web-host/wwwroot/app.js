@@ -43,6 +43,7 @@ try {
 try { displayMemory=sanitizeDisplayMemory(JSON.parse(localStorage.getItem('od-last-displays')||'{}')); } catch {}
 updateMode();
 updateFingerMode();
+updateDebugOverlay($('showDebugLog').checked);
 function restoreTarget(){
   if(!$('target'))return;
   $('target').value=rememberedDisplay(displayMemory,$('mode').value,displays);
@@ -91,6 +92,7 @@ function send(m) {
 function stop(message = '已停止。可重新選擇螢幕。') {
   if(stopping)return;
   stopping=true;
+  if(typeof sysLog==='function')sysLog(`STOP: ${message}`);
   fingerController?.cancelAll();fingerController=undefined;
   sessionSurface=undefined;activeSession=undefined;pendingSession=undefined;
   startInFlight=false;queuedRestartReason=undefined;clearTimeout(resizeTimer);
@@ -151,7 +153,7 @@ $('start').onclick = async () => {
   try {
     const saved={};
     for(const key of ['mode','mapping','fps','quality','pressureCurve','trackpadSensitivity','panelWidth','panelHeight','penBackground'])saved[key]=$(key).value;
-    saved.showActiveArea=$('showActiveArea').checked;saved.showHover=$('showHover').checked;
+    saved.showActiveArea=$('showActiveArea').checked;saved.showHover=$('showHover').checked;saved.showDebugLog=$('showDebugLog').checked;
     localStorage.setItem('od-preferences',JSON.stringify(sanitizePreferences(saved)));
   } catch {}
   stopping=false;
@@ -168,7 +170,8 @@ $('start').onclick = async () => {
   activeSession={mode,display,panelWidth,panelHeight,mapping:$('mapping').value,fps:Number($('fps').value),
     quality:$('quality').value,pressureCurve:$('pressureCurve').value,fingerMode:$('fingerMode').value,
     trackpadSensitivity:$('trackpadSensitivity').value,penBackground:$('penBackground').value,
-    showActiveArea:$('showActiveArea').checked,showHover:$('showHover').checked};
+    showActiveArea:$('showActiveArea').checked,showHover:$('showHover').checked,showDebugLog:$('showDebugLog').checked};
+  updateDebugOverlay(activeSession.showDebugLog);
   $('start').disabled = true; $('tablet').hidden = false;
   document.body.classList.add('writing');
   const ws = new WebSocket(`${wsOrigin}/control`); socket = ws;
@@ -179,6 +182,7 @@ $('start').onclick = async () => {
     if(m.type==='hello'&&m.dryRun){testMode=true;if(!$('destination').textContent.includes('測試模式'))$('destination').textContent+=' · 測試模式（不注入）';}
     if (m.type === 'started') {
       startInFlight=false;
+      if(typeof sysLog==='function')sysLog(`started gen=${m.generation} err=${m.error||'none'}`);
       if (!m.generation) { stop(m.error==='EXTEND_UNAVAILABLE_REGISTER_RESOLUTION_LOCALLY'?'Extend 無法建立：請先在 Windows 註冊此解析度並確認 Parsec 驅動。':'目標螢幕或映射無效。'); return; }
       if(queuedRestartReason){const reason=queuedRestartReason;queuedRestartReason=undefined;requestSession(reason);return;}
       const started=pendingSession;
@@ -200,11 +204,11 @@ $('start').onclick = async () => {
         vs.onclose=()=>{if(videoSocket===vs)stop('影片已中斷，輸入已停止。');};
       }
     }
-    if (m.type === 'state' && m.state >= 2) stop(({2:'目標螢幕消失',3:'目標螢幕位置或解析度改變',4:'控制心跳逾時'})[m.state]||`工作階段停止 (${m.state})`);
-    if (m.type === 'heartbeat' && !m.alive) stop('工作階段失效，請重新開始。');
+    if (m.type === 'state' && m.state >= 2) {if(typeof sysLog==='function')sysLog(`state=${m.state} → stop`);stop(({2:'目標螢幕消失',3:'目標螢幕位置或解析度改變',4:'控制心跳逾時'})[m.state]||`工作階段停止 (${m.state})`);}
+    if (m.type === 'heartbeat' && !m.alive) {if(typeof sysLog==='function')sysLog('heartbeat dead → stop');stop('工作階段失效，請重新開始。');}
   };
-  ws.onerror = () => { if(socket===ws) stop('連線失敗；主機可能正由另一個裝置使用。'); };
-  ws.onclose = () => { if(socket===ws) stop('主機已中斷連線。'); };
+  ws.onerror = () => { if(socket===ws){if(typeof sysLog==='function')sysLog('ws.onerror → stop');stop('連線失敗；主機可能正由另一個裝置使用。');} };
+  ws.onclose = () => { if(socket===ws){if(typeof sysLog==='function')sysLog('ws.onclose → stop');stop('主機已中斷連線。');} };
   try { wakeLock = await navigator.wakeLock?.request('screen'); } catch {}
 };
 function sample(e, phase) {
@@ -246,11 +250,57 @@ surface.addEventListener('pointerdown',e=>{
 surface.addEventListener('pointermove',e=>{if(e.pointerType==='touch'&&fingerController){const {x,y}=fingerPoint(e);fingerController.move(e.pointerId,x,y,e.timeStamp);}});
 surface.addEventListener('pointerup',e=>{if(e.pointerType==='touch'&&fingerController){const {x,y}=fingerPoint(e);fingerController.up(e.pointerId,x,y,e.timeStamp);}});
 for(const name of ['pointercancel','lostpointercapture'])surface.addEventListener(name,e=>{if(e.pointerType==='touch'&&fingerController){const {x,y}=fingerPoint(e);fingerController.up(e.pointerId,x,y,e.timeStamp,true);}});
+// ── Pen event diagnostics & toolbar controls ──
+const _dbg=document.createElement('div');
+_dbg.id='debugOverlay';
+Object.assign(_dbg.style,{position:'fixed',bottom:'0',left:'0',right:'0',maxHeight:'40vh',overflow:'auto',background:'rgba(0,0,0,.85)',color:'#0f0',font:'11px/1.4 monospace',padding:'6px 8px',zIndex:'9999',pointerEvents:'none',whiteSpace:'pre',display:'none'});
+document.body.appendChild(_dbg);const _dbgLines=[];
+function updateDebugOverlay(show){
+  _dbg.style.display=show?'block':'none';
+  if($('toggleLogBtn'))$('toggleLogBtn').hidden=!show;
+  if(show){_dbg.textContent=_dbgLines.join('\n');_dbg.scrollTop=_dbg.scrollHeight;}
+}
+function penLog(tag,e){
+  const line=`${tag.padEnd(10)} id=${e.pointerId} btn=${e.buttons} p=${(e.pressure??-1).toFixed(3)} ptr=${pointer} gen=${generation} type=${e.pointerType}`;
+  _dbgLines.push(line);if(_dbgLines.length>30)_dbgLines.shift();
+  if(_dbg.style.display!=='none'){_dbg.textContent=_dbgLines.join('\n');_dbg.scrollTop=_dbg.scrollHeight;}
+}
+function sysLog(msg){
+  _dbgLines.push(`>>> ${msg}`);if(_dbgLines.length>30)_dbgLines.shift();
+  if(_dbg.style.display!=='none'){_dbg.textContent=_dbgLines.join('\n');_dbg.scrollTop=_dbg.scrollHeight;}
+}
+$('showDebugLog').onchange=()=>updateDebugOverlay($('showDebugLog').checked);
+$('toggleLogBtn').onclick=()=>{
+  const next=_dbg.style.display==='none'?'block':'none';
+  _dbg.style.display=next;
+  if(next==='block'){_dbg.textContent=_dbgLines.join('\n');_dbg.scrollTop=_dbg.scrollHeight;}
+};
+$('fullscreenBtn').onclick=async()=>{
+  try{
+    if(document.fullscreenElement||document.webkitFullscreenElement){
+      if(document.exitFullscreen)await document.exitFullscreen();
+      else if(document.webkitExitFullscreen)await document.webkitExitFullscreen();
+    }else{
+      const el=$('tablet');
+      if(el.requestFullscreen)await el.requestFullscreen();
+      else if(document.documentElement.requestFullscreen)await document.documentElement.requestFullscreen();
+      else if(document.documentElement.webkitRequestFullscreen)await document.documentElement.webkitRequestFullscreen();
+    }
+  }catch{}
+};
+const syncFullscreen=()=>{
+  const isFs=!!(document.fullscreenElement||document.webkitFullscreenElement);
+  $('fullscreenBtn').textContent=isFs?'離開全螢幕':'全螢幕';
+};
+document.addEventListener('fullscreenchange',syncFullscreen);
+document.addEventListener('webkitfullscreenchange',syncFullscreen);
+// ── End diagnostics & toolbar controls ──
 surface.addEventListener('pointerdown',e=> {
+  if(e.pointerType==='pen')penLog('DOWN',e);
   e.preventDefault(); if(e.pointerType!=='pen'||pointer!==null||!generation)return;
   updateHoverIndicator(e,false);pointer=e.pointerId;try{surface.setPointerCapture(pointer);}catch{}sample(e,0);
 });
-surface.addEventListener('pointerenter',e=>{if(e.pointerType==='pen'&&pointer===null&&generation){e.preventDefault();sample(e,3);updateHoverIndicator(e,true);}});
+surface.addEventListener('pointerenter',e=>{if(e.pointerType==='pen'){penLog('ENTER',e);if(pointer===null&&generation){e.preventDefault();sample(e,3);updateHoverIndicator(e,true);}}});
 surface.addEventListener('pointermove',e=> {
   if(e.pointerType!=='pen')return; e.preventDefault();
   if(pointer!==null && pointer!==e.pointerId)return;
@@ -258,10 +308,10 @@ surface.addEventListener('pointermove',e=> {
   for(const point of batch?.length?batch:[e]) sample(point,pointer===e.pointerId?1:3);
   updateHoverIndicator(e,pointer===null);
 });
-surface.addEventListener('pointerup',e=>{if(e.pointerId===pointer){sample(e,2);pointer=null;updateHoverIndicator(e,true);}});
-surface.addEventListener('pointercancel',e=>{if(e.pointerId===pointer){sample(e,4);pointer=null;}updateHoverIndicator(e,false);});
-surface.addEventListener('lostpointercapture',e=>{if(e.pointerType==='pen')updateHoverIndicator(e,pointer===null);});
-surface.addEventListener('pointerleave',e=>{if(e.pointerType==='pen'&&pointer===null)sample(e,4);if(e.pointerType==='pen')updateHoverIndicator(e,false);});
+surface.addEventListener('pointerup',e=>{if(e.pointerType==='pen'){penLog('UP',e);if(e.pointerId===pointer){sample(e,2);pointer=null;updateHoverIndicator(e,true);}}});
+surface.addEventListener('pointercancel',e=>{if(e.pointerType==='pen'){penLog('CANCEL',e);if(e.pointerId===pointer){sample(e,4);pointer=null;}updateHoverIndicator(e,false);}});
+surface.addEventListener('lostpointercapture',e=>{if(e.pointerType==='pen'){penLog('LOSTCAP',e);updateHoverIndicator(e,pointer===null);}});
+surface.addEventListener('pointerleave',e=>{if(e.pointerType==='pen'){penLog('LEAVE',e);if(pointer===null)sample(e,4);updateHoverIndicator(e,false);}});
 surface.addEventListener('contextmenu',e=>e.preventDefault());
 $('stop').onclick=()=>stop(); $('refresh').onclick=()=>refresh().catch(e=>status(e.message));
 document.addEventListener('visibilitychange',()=>{if(document.hidden&&socket)stop('切到背景，已停止輸入。');});
