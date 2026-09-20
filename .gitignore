@@ -15,3 +15,4 @@ __pycache__/
 *.key
 host-data/
 host-data-test/
+paired-devices.json*

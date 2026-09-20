@@ -28,7 +28,20 @@ if (native == 0) throw new InvalidOperationException("Native initialization fail
 string? owner = null;
 VideoSession? video = null;
 void CancelVideo() { video?.Cancel(); }
-var tokens = new HashSet<string>();
+// Store only SHA256 token hashes; the credential stays in an HttpOnly cookie.
+var pairingFile = Path.GetFullPath(builder.Configuration["pairing-store"] ?? Path.Combine(AppContext.BaseDirectory, "paired-devices.json"));
+var tokens = new Dictionary<string, DateTimeOffset>();
+if (!localTest && File.Exists(pairingFile)) {
+    try { tokens = JsonSerializer.Deserialize<Dictionary<string, DateTimeOffset>>(File.ReadAllText(pairingFile)) ?? new(); }
+    catch (JsonException) { Console.Error.WriteLine("Pairing store invalid; please pair again."); }
+}
+string TokenHash(string token) => Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(token)));
+void SavePairings() {
+    if (localTest) return;
+    var temp = pairingFile + ".tmp";
+    File.WriteAllText(temp, JsonSerializer.Serialize(tokens));
+    File.Move(temp, pairingFile, true);
+}
 var code = Convert.ToHexString(RandomNumberGenerator.GetBytes(6));
 var codeExpires = DateTimeOffset.UtcNow.AddMinutes(5);
 string? pending = null;
@@ -54,7 +67,7 @@ _ = Task.Run(() => {
                     Console.WriteLine($"Pairing code: {code}");
                     break;
                 case "revoke":
-                    tokens.Clear(); Native.od_stop(native); CancelVideo(); Console.WriteLine("All device sessions revoked.");
+                    tokens.Clear(); SavePairings(); Native.od_stop(native); CancelVideo(); Console.WriteLine("All device sessions revoked.");
                     break;
                 case "quit": app.Lifetime.StopApplication(); return;
             }
@@ -62,7 +75,8 @@ _ = Task.Run(() => {
     }
 });
 bool Auth(HttpContext c) {
-    lock (gate) return c.Request.Cookies.TryGetValue("od-device", out var token) && tokens.Contains(token);
+    lock (gate) return c.Request.Cookies.TryGetValue("od-device", out var token) &&
+        tokens.TryGetValue(TokenHash(token), out var expiry) && expiry > DateTimeOffset.UtcNow;
 }
 app.Use(async (c, next) => {
     c.Response.Headers["Cache-Control"] = "no-store";
@@ -102,8 +116,9 @@ app.MapPost("/pair/status", async (HttpContext c) => {
             return Results.Unauthorized();
         if (!approved) return Results.Json(new { ready = false });
         var token = Convert.ToHexString(RandomNumberGenerator.GetBytes(32));
-        tokens.Add(token); pending = null; codeExpires = DateTimeOffset.MinValue;
-        c.Response.Cookies.Append("od-device", token, new CookieOptions { HttpOnly = true, Secure = !localTest, SameSite = SameSiteMode.Strict });
+        var expiry = DateTimeOffset.UtcNow.AddDays(30);
+        tokens[TokenHash(token)] = expiry; SavePairings(); pending = null; codeExpires = DateTimeOffset.MinValue;
+        c.Response.Cookies.Append("od-device", token, new CookieOptions { HttpOnly = true, Secure = !localTest, SameSite = SameSiteMode.Strict, Expires = expiry });
         return Results.Json(new { ready = true });
     }
 });

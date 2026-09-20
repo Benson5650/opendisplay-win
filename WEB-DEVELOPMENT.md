@@ -39,8 +39,9 @@ mode switches or automatically redirect input after a target disappears.
 
 1. Validate the implemented Kestrel HTTPS/WSS host, C++ bridge, and Pencil-only
    PWA on iPad hardware. No capture/encoder/VDD initialization in Pen Tablet mode.
-2. Add durable per-device credentials and individual revocation. Current preview
-   pairing is intentionally memory-only and must repeat after a host restart.
+2. Pairing now persists SHA256 credential hashes and 30-day expirations in
+   paired-devices.json, alongside the host. HttpOnly cookies survive restart.
+   Global revoke persists; individual revocation remains pending.
 3. Validate Mirror in a real browser: explicit display selection, complete H.264
    access units, WebCodecs, bounded queues, IDR recovery and letterbox mapping are
    implemented. Loopback integration verifies actual capture and H.264 transport,

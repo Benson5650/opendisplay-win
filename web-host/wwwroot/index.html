@@ -2,7 +2,7 @@
 <html lang="zh-Hant"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no"><meta name="theme-color" content="#101722"><link rel="manifest" href="/manifest.webmanifest"><link rel="stylesheet" href="/style.css"><title>OpenDisplay · Pen Tablet</title></head>
 <body><main>
 <header><span class="badge">OpenDisplay Web · Preview</span><h1>把 iPad 變成手寫板</h1><p id="status" role="status">請先配對 Windows 主機。</p></header>
-<section id="pairing"><label>主機顯示的配對碼 <input id="code" autocomplete="off" maxlength="12" spellcheck="false"></label><button id="pair">配對</button><p>輸入後，需在 Windows 主機輸入 approve 確認。重新啟動主機須重新配對。</p></section>
+<section id="pairing"><label>主機顯示的配對碼 <input id="code" autocomplete="off" maxlength="12" spellcheck="false"></label><button id="pair">配對</button><p>首次輸入後，在 Windows 主機輸入 approve。此瀏覽器會記住授權 30 天，重啟不必重新配對。</p></section>
 <section id="settings" hidden>
 <label>模式 <select id="mode"><option value="pen">Pen Tablet · 純手寫</option><option value="mirror">Mirror · 鏡像既有螢幕</option><option value="extend">Extend · 新增延伸螢幕</option></select></label>
 <label id="targetField">控制的 Windows 螢幕 <select id="target"><option value="">請選擇螢幕</option></select></label>
