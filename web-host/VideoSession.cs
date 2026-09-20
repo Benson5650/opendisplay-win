@@ -64,8 +64,12 @@ internal sealed class VideoSession : IDisposable
                     BinaryPrimitives.WriteUInt32LittleEndian(packet.AsSpan(28), (uint)length);
                     pixels.AsSpan(0,length).CopyTo(packet.AsSpan(32));
                     using var deadline = CancellationTokenSource.CreateLinkedTokenSource(ct);
-                    deadline.CancelAfter(500); // Never accumulate unbounded stale video.
-                    await socket.SendAsync(packet, WebSocketMessageType.Binary, true, deadline.Token);
+                    deadline.CancelAfter(TimeSpan.FromSeconds(2)); // Bound stale video without treating a brief Wi-Fi stall as a disconnect.
+                    try {
+                        await socket.SendAsync(packet, WebSocketMessageType.Binary, true, deadline.Token);
+                    } catch (OperationCanceledException) when (!ct.IsCancellationRequested) {
+                        throw new TimeoutException("Video client stopped accepting frames for 2 seconds");
+                    }
                 } else await Task.Delay(5, ct);
                 if(state == 1 && clock.Elapsed > TimeSpan.FromSeconds(10)) throw new InvalidOperationException("Video startup timeout");
             }

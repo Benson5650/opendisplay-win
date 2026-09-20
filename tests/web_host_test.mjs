@@ -1,12 +1,15 @@
 import {spawn} from 'node:child_process';
 import {resolve} from 'node:path';
+import {randomUUID} from 'node:crypto';
+import {rm} from 'node:fs/promises';
 import assert from 'node:assert/strict';
 
 // NODE_EXTRA_CA_CERTS must point at the generated CA PEM. TLS verification stays ON.
 const root=resolve(import.meta.dirname,'..');
 const origin='https://127.0.0.1:19443';
+const pairingStore=resolve(root,'host-data-test',`web-host-${randomUUID()}.json`);
 const host=spawn('dotnet',[resolve(root,'web-host/bin/Release/net10.0-windows/OpenDisplay.Web.dll'),
-  '--ip','127.0.0.1','--port','19443','--cert',resolve(root,'host-data-test/host.pfx'),'--dry-run','true'],
+  '--ip','127.0.0.1','--port','19443','--cert',resolve(root,'host-data-test/host.pfx'),'--dry-run','true','--pairing-store',pairingStore],
   {cwd:resolve(root,'web-host'),stdio:['pipe','pipe','pipe']});
 let log='',errors='',checks=0;
 host.stdout.on('data',d=>log+=d.toString());host.stderr.on('data',d=>errors+=d.toString());
@@ -22,6 +25,8 @@ try {
   for(let i=0;i<100;i++){try{r=await fetch(origin);break;}catch{await delay(50);}}
   check(r?.status===200,'trusted TLS and static shell');
   check((await r.text()).includes('Pen Tablet'),'page content');
+  const style=await (await fetch(origin+'/style.css')).text();
+  check(style.includes('100svh')&&!style.includes('100dvh'),'stable iPad viewport does not resize on Safari toolbar changes');
   check((await fetch(origin+'/displays')).status===401,'display enumeration requires auth');
   check((await post('/pair',{code},{Origin:'https://evil.example'})).status===403,'foreign origin rejected');
   r=await post('/pair',{code}); check(r.status===200,'pair request');
@@ -71,7 +76,7 @@ try {
   check((await ws.next(m=>m.type==='sample')).accepted===0,'stationary held pen still suppresses palm');
   if(process.env.OD_TEST_MIRROR==='1'||process.env.OD_TEST_EXTEND==='1') {
     const extend=process.env.OD_TEST_EXTEND==='1';
-    ws.send({type:'start',mode:extend?'extend':'mirror',quality:process.env.OD_TEST_QUALITY||'balanced',panelWidth:2360,panelHeight:1640,fps:30,target:extend?'':displays[0].id,width:1000,height:750,mapping:'preserve'});
+    ws.send({type:'start',mode:extend?'extend':'mirror',touch:true,quality:process.env.OD_TEST_QUALITY||'balanced',panelWidth:2360,panelHeight:1640,fps:30,target:extend?'':displays[0].id,width:1000,height:750,mapping:'preserve'});
     const mirrored=await ws.next(m=>m.type==='started');
     check(mirrored.generation>0&&mirrored.videoTicket,'mirror started with ticket');
     keepalive=setInterval(()=>ws.send({type:'heartbeat',generation:mirrored.generation}),500);
@@ -84,6 +89,13 @@ try {
     let frame=parsePacket(bytes.buffer.slice(bytes.byteOffset,bytes.byteOffset+bytes.length),mirrored.generation);
     check(frame?.key&&codecFromAnnexB(frame.data),'first frame is decodable IDR with SPS');
     check(frame.width===(extend?2360:displays[0].width)&&frame.height===(extend?1640:displays[0].height),'capture matches input target');
+    await delay(750);
+    ws.send({type:'touch',generation:mirrored.generation,sequence:1,phase:0,x:250,y:200});
+    check((await ws.next(m=>m.type==='sample')).accepted===1,'single-finger mouse down accepted while video streams');
+    ws.send({type:'touch',generation:mirrored.generation,sequence:2,phase:1,x:300,y:225});
+    check((await ws.next(m=>m.type==='sample')).accepted===1,'single-finger mouse drag accepted while video streams');
+    ws.send({type:'touch',generation:mirrored.generation,sequence:3,phase:2,x:300,y:225});
+    check((await ws.next(m=>m.type==='sample')).accepted===1,'single-finger mouse up accepted while video streams');
     ws.send({type:'keyframe',generation:mirrored.generation});
     let sawKey=false;
     for(let i=0;i<60&&!sawKey;i++) {
@@ -94,6 +106,8 @@ try {
     check(sawKey,'keyframe recovery');
     ws.send({type:'stop'});await ws.next(m=>m.type==='stopped');
     clearInterval(keepalive);video.close();video=undefined;
+    await delay(100);
+    check(!errors.includes('TaskCanceledException'),'normal video stop is not reported as a failure');
     await assert.rejects(connect(origin.replace('https','wss')+'/video?ticket='+mirrored.videoTicket,{Origin:origin,Cookie:authCookie}));checks++;
     if(extend){
       let restored=false;
@@ -112,5 +126,6 @@ try {
   clearInterval(keepalive);video?.close();ws?.close();host.stdin.write('quit\n');
   await Promise.race([new Promise(r=>host.once('exit',r)),delay(3000)]);
   if(host.exitCode===null)host.kill();
+  await rm(pairingStore,{force:true});
   if(errors)console.error('Host stderr:',errors); // Never print stdout containing credentials.
 }

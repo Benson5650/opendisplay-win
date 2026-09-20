@@ -1,8 +1,9 @@
 # OpenDisplay Web for Windows — development status
 
 This fork is a work in progress. Pen Tablet, Mirror, and Extend have an HTTPS/WSS
-host and PWA. Actual browser visual and iPad/Pencil acceptance remains
-pending. The installed native application is not replaced by development builds.
+host and PWA. Mirror and Extend have rendered successfully on the target iPad;
+broader Pencil/Windows Ink acceptance remains pending. The installed native
+application is not replaced by development builds.
 
 ## Implemented foundation
 
@@ -35,17 +36,17 @@ Never forward predicted points. A release callback must release both pen and
 mouse state. Capture teardown must precede VDD removal. Do not queue input across
 mode switches or automatically redirect input after a target disappears.
 
-## Next milestones (not implemented)
+## Current product status and next milestones
 
-1. Validate the implemented Kestrel HTTPS/WSS host, C++ bridge, and Pencil-only
-   PWA on iPad hardware. No capture/encoder/VDD initialization in Pen Tablet mode.
+1. Continue Pencil and Windows Ink hardware acceptance. Pen Tablet mode does not
+   initialize capture, encoder, or VDD resources.
 2. Pairing now persists SHA256 credential hashes and 30-day expirations in
    paired-devices.json, alongside the host. HttpOnly cookies survive restart.
-   Global revoke persists; individual revocation remains pending.
-3. Validate Mirror in a real browser: explicit display selection, complete H.264
-   access units, WebCodecs, bounded queues, IDR recovery and letterbox mapping are
-   implemented. Loopback integration verifies actual capture and H.264 transport,
-   not visual decoding quality or Pencil alignment.
+   Global revoke persists, and each browser can revoke only its own credential.
+3. Mirror uses explicit display selection, complete H.264 access units, WebCodecs,
+   bounded queues, IDR recovery and letterbox mapping. Optional single-finger
+   mouse control is suppressed while Pencil is active. Loopback integration
+   verifies actual capture, H.264 transport and touch routing.
 4. Extend is connected through existing Parsec VDD. Loopback tests create a
    registered 2360x1640 monitor, receive H.264, then verify restoration of the
    original active-display identities. Native pv3 runtime regression remains.
@@ -86,13 +87,15 @@ without `--dry-run true` only when ready to test actual Windows Ink input.
 
 No firewall exception is added automatically. If needed, authorize only this
 application/port on your trusted private LAN. The host binds only the given IP.
-Do not expose it to the Internet. The preview remains a console application,
-without persistent pairing, QR code, tray integration, or an installer.
+Do not expose it to the Internet. The preview remains a console application
+without QR onboarding, tray integration, display-identify overlay, automatic
+rotation restart, or an installer.
 
 The native core uses serialized bridge calls. A 100ms timer stops input on target
 loss/geometry change or a two-second silence; PWA sends 500ms heartbeats. Entering
 background, resizing, pointer cancellation and losing capture terminate strokes.
-Coalesced actual events are sent; predicted events and finger input are not.
+Coalesced actual Pencil events are sent; predicted events are not. Optional
+single-finger input maps to mouse click/drag and is disabled by default.
 
 Automated integration (no desktop input; CA validation stays enabled):
 
@@ -104,7 +107,8 @@ node tests/web_host_test.mjs
 
 Set `OD_TEST_MIRROR=1` to additionally capture the first active display over
 loopback (memory only, no saved frames) and check the video ticket, IDR/SPS,
-geometry, keyframe request, and ticket invalidation. Input remains dry-run.
+geometry, keyframe request, ticket invalidation, and single-finger mouse event
+routing while video continues. Input remains dry-run.
 Run `node tests/video_packet_test.mjs` and `node tests/video_receiver_test.mjs`
 for packet and simulated decoder lifecycle tests. These do not prove Safari
 hardware decoding. Mirror currently preserves aspect ratio and captures native
@@ -129,12 +133,11 @@ command using administrator approval. Keep the web host un-elevated.
 
 `OD_TEST_EXTEND=1` runs the integration test against the existing registered
 2360x1640 mode. This temporarily changes desktop topology; do not run while a
-critical display task is active. Current observed result: 31 integration checks
-passed, including IDR/SPS, geometry and restored original active displays.
-`OD_TEST_MIRROR=1` observed 30 checks passed. Both use dry-run input, trusted TLS,
+critical display task is active. Current observed result: 41 integration checks
+passed, including IDR/SPS, touch routing, geometry and restored original active
+displays. `OD_TEST_MIRROR=1` observed 40 checks passed. Both use dry-run input, trusted TLS,
 and loopback video only. Neither test validates Safari rendering or pen accuracy.
 
-Unfinished product features remain explicitly out of the current preview:
-durable pairing/individual revocation, QR onboarding, tray UI, optional finger
-mouse input, resolution scaling/quality presets, automatic rotation restart,
+Unfinished product features remain explicitly out of the current preview: QR
+onboarding, tray UI/autostart, resolution scaling, automatic rotation restart,
 display-identify overlay and installer packaging. Do not call this a finished V1.

@@ -122,6 +122,16 @@ app.MapPost("/pair/status", async (HttpContext c) => {
         return Results.Json(new { ready = true });
     }
 });
+app.MapPost("/unpair", (HttpContext c) => {
+    if (!Auth(c)) return Results.Unauthorized();
+    lock (gate) {
+        tokens.Remove(TokenHash(c.Request.Cookies["od-device"]!));
+        SavePairings();
+        // Control watchdog sees revoked auth and releases only its session.
+        c.Response.Cookies.Delete("od-device", new CookieOptions { Secure = !localTest, HttpOnly = true, SameSite = SameSiteMode.Strict });
+        return Results.Json(new { forgotten = true });
+    }
+});
 app.MapGet("/displays", (HttpContext c) => {
     if (!Auth(c)) return Results.Unauthorized();
     lock (gate) {
@@ -260,7 +270,9 @@ app.Map("/control", async (HttpContext c) => {
                 }
                 await Send(response);
             }
-        } catch (Exception e) when (e is JsonException or InvalidOperationException or KeyNotFoundException or FormatException or WebSocketException or OperationCanceledException) {
+        } catch (OperationCanceledException) {
+            // Normal when the page stops a session, disconnects, or the host exits.
+        } catch (Exception e) when (e is JsonException or InvalidOperationException or KeyNotFoundException or FormatException or WebSocketException) {
             Console.Error.WriteLine($"Control ended: {e.GetType().Name}");
             // Malformed or lost connections always release input in finally.
         } finally {
@@ -285,7 +297,9 @@ app.Map("/video", async (HttpContext c) => {
     try {
         using var socket = await c.WebSockets.AcceptWebSocketAsync();
         await selected.Stream(socket, c.RequestAborted);
-    } catch (Exception e) when (e is OperationCanceledException or WebSocketException or InvalidOperationException) {
+    } catch (OperationCanceledException) {
+        // Expected when control sends stop or the browser closes the video socket.
+    } catch (Exception e) when (e is WebSocketException or InvalidOperationException or TimeoutException) {
         // A failed video connection invalidates input for this generation only.
         Console.Error.WriteLine($"Video ended: {e.GetType().Name}: {e.Message}");
     } finally {

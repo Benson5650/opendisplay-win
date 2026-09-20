@@ -1,6 +1,7 @@
 'use strict';
 import {VideoReceiver} from './video.mjs';
 import {surfaceChanged} from './geometry.mjs';
+import {sanitizePreferences} from './preferences.mjs';
 let sessionSurface;
 let finger=null,lastPenAt=-Infinity;
 let videoSocket, videoReceiver, stopping=false;
@@ -18,6 +19,18 @@ function updateMode() {
   if(mode!=='pen')$('mapping').value='preserve';
 }
 $('mode').onchange=updateMode;
+$('forget').onclick=async()=>{
+  if(!confirm('撤銷此瀏覽器的配對？下次需要重新輸入配對碼。'))return;
+  try {
+    await post('/unpair',{});
+    stop('已忘記此裝置。');
+    $('settings').hidden=true;$('pairing').hidden=false;
+  } catch(e){status(e.message);}
+};
+try {
+  const saved=sanitizePreferences(JSON.parse(localStorage.getItem('od-preferences')||'{}'));
+  for(const [key,value] of Object.entries(saved))$(key).value=value;
+} catch {}
 updateMode();
 async function post(path, value) {
   const r = await fetch(path, {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(value)});
@@ -72,6 +85,11 @@ function stop(message = '已停止。可重新選擇螢幕。') {
   $('start').disabled = false; status(message);
 }
 $('start').onclick = async () => {
+  try {
+    const saved={};
+    for(const key of ['mode','mapping','fps','quality','pressureCurve','panelWidth','panelHeight'])saved[key]=$(key).value;
+    localStorage.setItem('od-preferences',JSON.stringify(sanitizePreferences(saved)));
+  } catch {}
   stopping=false;
   const mode=$('mode').value;
   if(mode!=='pen'&&!('VideoDecoder' in window)){status('此瀏覽器不支援 WebCodecs VideoDecoder。');return;}
