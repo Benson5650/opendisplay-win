@@ -165,8 +165,9 @@ void IdentifyDisplays()
 
             if (hwnd) {
                 SetWindowLongPtrW(hwnd, GWLP_USERDATA, reinterpret_cast<LONG_PTR>(&infoList[i]));
-                SetLayeredWindowAttributes(hwnd, 0, 240, LWA_ALPHA);
+                SetLayeredWindowAttributes(hwnd, 0, 245, LWA_ALPHA);
                 ShowWindow(hwnd, SW_SHOWNOACTIVATE);
+                SetWindowPos(hwnd, HWND_TOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_SHOWWINDOW | SWP_NOACTIVATE);
                 InvalidateRect(hwnd, nullptr, TRUE);
                 UpdateWindow(hwnd);
                 hwnds.push_back(hwnd);
@@ -174,7 +175,7 @@ void IdentifyDisplays()
         }
 
         auto start = std::chrono::steady_clock::now();
-        while (std::chrono::steady_clock::now() - start < std::chrono::milliseconds(2500)) {
+        while (std::chrono::steady_clock::now() - start < std::chrono::milliseconds(4000)) {
             MSG msg;
             while (PeekMessageW(&msg, nullptr, 0, 0, PM_REMOVE)) {
                 TranslateMessage(&msg);

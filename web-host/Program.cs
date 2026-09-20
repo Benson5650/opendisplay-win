@@ -142,6 +142,7 @@ app.MapGet("/displays", (HttpContext c) => {
 });
 app.MapPost("/identify", (HttpContext c) => {
     if (!Auth(c)) return Results.Unauthorized();
+    Console.WriteLine(">>> Identify displays triggered");
     Native.od_identify_displays();
     return Results.Json(new { ok = true });
 });
