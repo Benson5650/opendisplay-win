@@ -100,7 +100,7 @@ function stop(message = '已停止。可重新選擇螢幕。') {
   videoReceiver?.close(); videoReceiver=undefined;
   const oldVideo=videoSocket;videoSocket=undefined;oldVideo?.close();
   document.getElementById('videoCanvas')?.remove();
-  $('hoverIndicator').hidden=true;
+  $('hoverIndicator').classList.remove('visible');
   document.querySelector('.hint').hidden=false;
   generation = 0; pointer = null; clearInterval(heartbeat);
   if (oldControl?.readyState === WebSocket.OPEN) oldControl.send(JSON.stringify({type:'stop'}));
@@ -114,7 +114,7 @@ function teardownGeneration(){
   const receiver=videoReceiver;videoReceiver=undefined;receiver?.close();
   const oldVideo=videoSocket;videoSocket=undefined;oldVideo?.close();
   document.getElementById('videoCanvas')?.remove();
-  $('hoverIndicator').hidden=true;
+  $('hoverIndicator').classList.remove('visible');
   document.querySelector('.hint').hidden=false;
   generation=0;sequence=0;pointer=null;clearInterval(heartbeat);
 }
@@ -216,8 +216,12 @@ function sample(e, phase) {
     const tx=Math.tan((e.tiltX||0)*Math.PI/180), ty=Math.tan((e.tiltY||0)*Math.PI/180);
     az=(Math.atan2(ty,tx)+2*Math.PI)%(2*Math.PI); alt=Math.atan2(1,Math.hypot(tx,ty));
   }
+  let pressure=0;
+  if(phase===0||phase===1){
+    pressure=(typeof e.pressure==='number'&&e.pressure>0)?Math.min(1,e.pressure):0.5;
+  }
   send({type:'pen',generation,sequence:++sequence,phase,x:e.clientX-r.left,y:e.clientY-r.top,
-    pressure:phase===0||phase===1?e.pressure:0,azimuth:az,altitude:alt});
+    pressure,azimuth:az,altitude:alt});
 }
 const surface=$('surface');
 function fingerPoint(e){
@@ -226,11 +230,11 @@ function fingerPoint(e){
 }
 function updateHoverIndicator(e,visible){
   const indicator=$('hoverIndicator');
-  if(!visible||!activeSession?.showHover||!generation){indicator.hidden=true;return;}
+  if(!visible||!activeSession?.showHover||!generation){indicator.classList.remove('visible');return;}
   const point=pointInsideSurface(e.clientX,e.clientY,surface.getBoundingClientRect());
-  if(!point){indicator.hidden=true;return;}
+  if(!point){indicator.classList.remove('visible');return;}
   const {x,y}=point;
-  indicator.style.transform=`translate(${x}px,${y}px)`;indicator.hidden=false;
+  indicator.style.transform=`translate(${x}px,${y}px)`;indicator.classList.add('visible');
 }
 surface.addEventListener('pointerdown',e=>{
   if(e.pointerType!=='touch'||!fingerController||!generation)return;
@@ -244,7 +248,7 @@ surface.addEventListener('pointerup',e=>{if(e.pointerType==='touch'&&fingerContr
 for(const name of ['pointercancel','lostpointercapture'])surface.addEventListener(name,e=>{if(e.pointerType==='touch'&&fingerController){const {x,y}=fingerPoint(e);fingerController.up(e.pointerId,x,y,e.timeStamp,true);}});
 surface.addEventListener('pointerdown',e=> {
   e.preventDefault(); if(e.pointerType!=='pen'||pointer!==null||!generation)return;
-  updateHoverIndicator(e,false);pointer=e.pointerId;surface.setPointerCapture(pointer);sample(e,0);
+  updateHoverIndicator(e,false);pointer=e.pointerId;try{surface.setPointerCapture(pointer);}catch{}sample(e,0);
 });
 surface.addEventListener('pointerenter',e=>{if(e.pointerType==='pen'&&pointer===null&&generation){e.preventDefault();sample(e,3);updateHoverIndicator(e,true);}});
 surface.addEventListener('pointermove',e=> {
@@ -256,7 +260,7 @@ surface.addEventListener('pointermove',e=> {
 });
 surface.addEventListener('pointerup',e=>{if(e.pointerId===pointer){sample(e,2);pointer=null;updateHoverIndicator(e,true);}});
 surface.addEventListener('pointercancel',e=>{if(e.pointerId===pointer){sample(e,4);pointer=null;}updateHoverIndicator(e,false);});
-surface.addEventListener('lostpointercapture',e=>{if(e.pointerId===pointer){sample(e,4);pointer=null;}updateHoverIndicator(e,false);});
+surface.addEventListener('lostpointercapture',e=>{if(e.pointerType==='pen')updateHoverIndicator(e,pointer===null);});
 surface.addEventListener('pointerleave',e=>{if(e.pointerType==='pen'&&pointer===null)sample(e,4);if(e.pointerType==='pen')updateHoverIndicator(e,false);});
 surface.addEventListener('contextmenu',e=>e.preventDefault());
 $('stop').onclick=()=>stop(); $('refresh').onclick=()=>refresh().catch(e=>status(e.message));
