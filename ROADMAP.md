@@ -89,6 +89,11 @@ component-mapping, some ours:
   altitude, map enter/move/leave into Windows pen in-range/update/out-of-range
   events, expose an optional hover cursor, and add tests for Pencil takeover,
   display edges, rotation, backgrounding and disconnect cleanup.
+- **TODO: Remember the last selected Windows display.** Persist the explicit
+  display ID separately for Pen Tablet and Mirror, restore it only when that
+  exact ID is still present after `/displays` refresh, and otherwise leave the
+  selector empty. Never fall back to another monitor or auto-start a session;
+  Extend remains unaffected because it creates its own display.
 - **mDNS/Bonjour discovery** — half done. `src/net/Mdns.cpp` browses
   `_opensidecar._tcp` (a hand-rolled query, no Bonjour SDK) and the tray already
   uses it to name the iPads. What's left is the UX: offer the found receivers as
