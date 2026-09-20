@@ -138,6 +138,10 @@ app.Map("/control", async (HttpContext c) => {
         owner = connection;
     }
     var ownedVideos = new List<VideoSession>();
+    bool touchEnabled = false;
+    bool penContact = false;
+    string pressureCurve = "linear";
+    long lastPenAt = long.MinValue / 2;
     try {
         using var socket = await c.WebSockets.AcceptWebSocketAsync();
         using var shutdown = CancellationTokenSource.CreateLinkedTokenSource(c.RequestAborted, app.Lifetime.ApplicationStopping);
@@ -191,6 +195,10 @@ app.Map("/control", async (HttpContext c) => {
                     if (!Auth(c)) break;
                     switch (type) {
                         case "start":
+                            pressureCurve = m.TryGetProperty("pressureCurve", out var curveValue) ? curveValue.GetString() ?? "linear" : "linear";
+                            _ = PressureCurve.Apply(0, pressureCurve);
+                            penContact = false;
+                            touchEnabled = m.TryGetProperty("touch", out var touchValue) && touchValue.GetBoolean();
                             Native.od_stop(native); CancelVideo(); video = null;
                             var width = m.GetProperty("width").GetDouble(); var height = m.GetProperty("height").GetDouble();
                             var mapping = m.GetProperty("mapping").GetString();
@@ -231,11 +239,20 @@ app.Map("/control", async (HttpContext c) => {
                             var alive = Native.od_heartbeat(native, m.GetProperty("generation").GetUInt64());
                             response = new { type = "heartbeat", alive }; break;
                         case "pen":
+                            lastPenAt = Environment.TickCount64;
                             var ok = Native.od_sample(native, m.GetProperty("generation").GetUInt64(), m.GetProperty("sequence").GetUInt64(),
                                 m.GetProperty("phase").GetInt32(), m.GetProperty("x").GetDouble(), m.GetProperty("y").GetDouble(),
-                                m.GetProperty("pressure").GetDouble(), m.GetProperty("azimuth").GetDouble(), m.GetProperty("altitude").GetDouble());
+                                PressureCurve.Apply(m.GetProperty("pressure").GetDouble(),pressureCurve), m.GetProperty("azimuth").GetDouble(), m.GetProperty("altitude").GetDouble());
+                            if(ok != 0) penContact = m.GetProperty("phase").GetInt32() is 0 or 1;
                             if (!dryRun) continue;
                             response = new { type = "sample", accepted = ok, emitted = Native.od_emitted(native) }; break;
+                        case "touch":
+                            var phase = m.GetProperty("phase").GetInt32();
+                            var accepted = 0;
+                            if (touchEnabled && !penContact && Environment.TickCount64-lastPenAt > 700)
+                                accepted = Native.od_touch(native,m.GetProperty("generation").GetUInt64(),m.GetProperty("sequence").GetUInt64(),phase,m.GetProperty("x").GetDouble(),m.GetProperty("y").GetDouble());
+                            if (!dryRun) continue;
+                            response = new { type="sample",accepted,emitted=Native.od_emitted(native) }; break;
                         default: throw new JsonException("Unknown message");
                     }
                 }

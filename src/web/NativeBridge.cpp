@@ -35,6 +35,17 @@ struct Bridge {
             ++emitted;
             if (dryRun) return;
             injector.SetMonitorRect({t.left, t.top, t.left + t.width, t.top + t.height});
+            if (s.touch) {
+                od::TouchPhase touchPhase = od::TouchPhase::Unknown;
+                switch(s.phase) {
+                    case od::web::Phase::Down: touchPhase=od::TouchPhase::Began; break;
+                    case od::web::Phase::Move: touchPhase=od::TouchPhase::Moved; break;
+                    case od::web::Phase::Up: touchPhase=od::TouchPhase::Ended; break;
+                    default: return;
+                }
+                injector.HandleTouch({touchPhase,s.position.x*(t.width-1.0)/t.width,s.position.y*(t.height-1.0)/t.height});
+                return;
+            }
             od::PencilPhase phase = od::PencilPhase::Unknown;
             switch (s.phase) {
                 case od::web::Phase::Down: phase = od::PencilPhase::Down; break;
@@ -112,6 +123,12 @@ API int od_sample(void* handle, uint64_t generation, uint64_t sequence, int phas
 API uint64_t od_emitted(void* handle) noexcept
 {
     return handle ? static_cast<Bridge*>(handle)->emitted : 0;
+}
+API int od_touch(void* handle, uint64_t generation, uint64_t sequence, int phase, double x, double y) noexcept
+{
+    if (!handle || phase < 0 || phase > 4 || phase == 3) return 0;
+    return static_cast<Bridge*>(handle)->session.Handle({generation,sequence,od::web::Phase(phase),
+        {x,y},0,0,1.5707963267948966,true},od::web::PenTabletSession::Clock::now());
 }
 
 // Video handles are owned by one authenticated control session. Creation only

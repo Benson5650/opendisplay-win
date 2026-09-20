@@ -2,6 +2,7 @@
 import {VideoReceiver} from './video.mjs';
 import {surfaceChanged} from './geometry.mjs';
 let sessionSurface;
+let finger=null,lastPenAt=-Infinity;
 let videoSocket, videoReceiver, stopping=false;
 const $ = id => document.getElementById(id);
 const wsOrigin=location.origin.replace(/^http/, 'ws');
@@ -54,6 +55,7 @@ function stop(message = '已停止。可重新選擇螢幕。') {
   if(stopping)return;
   stopping=true;
   sessionSurface=undefined;
+  finger=null;
   status(message);
   console.info('OpenDisplay stopped:',message);
   const oldControl=socket;socket=undefined;
@@ -91,7 +93,7 @@ $('start').onclick = async () => {
   }
   Object.assign($('activeArea').style,{width:`${width}px`,height:`${height}px`,left:`${(surface.width-width)/2}px`,top:`${(surface.height-height)/2}px`});
   const ws = new WebSocket(`${wsOrigin}/control`); socket = ws;
-  ws.onopen = () => send({type:'start',mode,panelWidth,panelHeight,fps:Number($('fps').value),target:display.id,width:surface.width,height:surface.height,mapping:$('mapping').value});
+  ws.onopen = () => send({type:'start',mode,pressureCurve:$('pressureCurve').value,touch:$('touchEnabled').checked,panelWidth,panelHeight,fps:Number($('fps').value),target:display.id,width:surface.width,height:surface.height,mapping:$('mapping').value});
   ws.onmessage = e => {
     if (socket !== ws) return;
     const m = JSON.parse(e.data);
@@ -121,6 +123,7 @@ $('start').onclick = async () => {
   try { wakeLock = await navigator.wakeLock?.request('screen'); } catch {}
 };
 function sample(e, phase) {
+  lastPenAt=performance.now();finger=null;
   if (!generation) return;
   const r=$('surface').getBoundingClientRect();
   let az=e.azimuthAngle, alt=e.altitudeAngle;
@@ -132,6 +135,21 @@ function sample(e, phase) {
     pressure:phase===0||phase===1?e.pressure:0,azimuth:az,altitude:alt});
 }
 const surface=$('surface');
+function touchSample(e,phase){
+  if(!generation)return;
+  const r=surface.getBoundingClientRect();
+  send({type:'touch',generation,sequence:++sequence,phase,x:e.clientX-r.left,y:e.clientY-r.top});
+}
+surface.addEventListener('pointerdown',e=>{
+  if(e.pointerType!=='touch'||!$('touchEnabled').checked||!generation)return;
+  e.preventDefault();
+  if(finger!==null){touchSample(e,4);finger=null;return;}
+  if(pointer!==null||performance.now()-lastPenAt<700)return;
+  finger=e.pointerId;surface.setPointerCapture(finger);touchSample(e,0);
+});
+surface.addEventListener('pointermove',e=>{if(e.pointerType==='touch'&&e.pointerId===finger)touchSample(e,1);});
+surface.addEventListener('pointerup',e=>{if(e.pointerId===finger){touchSample(e,2);finger=null;}});
+for(const name of ['pointercancel','lostpointercapture'])surface.addEventListener(name,e=>{if(e.pointerId===finger){touchSample(e,4);finger=null;}});
 surface.addEventListener('pointerdown',e=> {
   e.preventDefault(); if(e.pointerType!=='pen'||pointer!==null||!generation)return;
   pointer=e.pointerId; surface.setPointerCapture(pointer); sample(e,0);

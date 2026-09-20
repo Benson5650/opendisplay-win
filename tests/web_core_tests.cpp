@@ -81,5 +81,23 @@ int main()
     session.Stop(); session.Stop();
     Check(released == before, "stop idempotent for releases");
     Check(emitted == 4, "only accepted pen events emitted");
+    session.Start(L"monitor-path", surface, Mapping::Stretch, now);
+    Sample touch{session.Generation(),1,Phase::Down,{500,375},0,0,1,true};
+    Check(session.Handle(touch,now), "touch down accepted");
+    Check(last.touch, "touch type preserved for injector");
+    int releaseBeforeSwitch=released;
+    Sample pen{session.Generation(),2,Phase::Down,{500,375},.5,0,1,false};
+    Check(session.Handle(pen,now), "pen takes over touch");
+    Check(released==releaseBeforeSwitch+1, "switch releases prior contact");
+    touch.sequence=3;touch.phase=Phase::Move;
+    int beforeLateTouch=released;
+    Check(!session.Handle(touch,now), "touch move cannot resurrect previous drag");
+    Check(released==beforeLateTouch, "rejected touch move preserves pen contact");
+    touch.sequence=4;touch.phase=Phase::Cancel;
+    Check(!session.Handle(touch,now), "late touch cancel rejected during pen stroke");
+    Check(released==beforeLateTouch, "late cancellation preserves pen contact");
+    pen.sequence=5;pen.phase=Phase::Move;
+    Check(session.Handle(pen,now), "pen stroke continues after stale touch");
+    session.Stop();
     std::cout << checks << " checks passed\n";
 }

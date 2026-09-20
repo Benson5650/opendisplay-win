@@ -55,6 +55,20 @@ try {
   ws.send({type:'start',target:displays[0].id,width:1000,height:750,mapping:'stretch'});
   const restarted=await ws.next(m=>m.type==='started');check(restarted.generation!==started.generation,'restart rotates generation');
   ws.send({...event,sequence:3});check((await ws.next(m=>m.type==='sample')).accepted===0,'old mapping rejected');
+  ws.send({type:'touch',generation:restarted.generation,sequence:4,phase:0,x:500,y:375});
+  check((await ws.next(m=>m.type==='sample')).accepted===0,'touch disabled by default');
+  ws.send({type:'start',touch:true,target:displays[0].id,width:1000,height:750,mapping:'stretch'});
+  const touchSession=await ws.next(m=>m.type==='started');
+  await delay(750);
+  ws.send({type:'touch',generation:touchSession.generation,sequence:1,phase:0,x:500,y:375});
+  check((await ws.next(m=>m.type==='sample')).accepted===1,'enabled touch accepted');
+  ws.send({...event,generation:touchSession.generation,sequence:2});
+  check((await ws.next(m=>m.type==='sample')).accepted===1,'pen takes over touch');
+  ws.send({type:'touch',generation:touchSession.generation,sequence:3,phase:0,x:500,y:375});
+  check((await ws.next(m=>m.type==='sample')).accepted===0,'touch suppressed after pen');
+  await delay(750);
+  ws.send({type:'touch',generation:touchSession.generation,sequence:4,phase:0,x:500,y:375});
+  check((await ws.next(m=>m.type==='sample')).accepted===0,'stationary held pen still suppresses palm');
   if(process.env.OD_TEST_MIRROR==='1'||process.env.OD_TEST_EXTEND==='1') {
     const extend=process.env.OD_TEST_EXTEND==='1';
     ws.send({type:'start',mode:extend?'extend':'mirror',panelWidth:2360,panelHeight:1640,fps:30,target:extend?'':displays[0].id,width:1000,height:750,mapping:'preserve'});

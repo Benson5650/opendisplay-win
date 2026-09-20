@@ -19,6 +19,7 @@ struct Sample {
     Phase phase{};
     Point position{};
     double pressure{}, azimuth{}, altitude{};
+    bool touch = false;
 };
 enum class SessionState { Idle, Active, TargetGone, MappingChanged, TimedOut };
 
@@ -91,7 +92,12 @@ public:
             sample.altitude < 0 || sample.altitude > 1.570796326794897) return false;
         lastSequence_ = sample.sequence;
         lastSeen_ = now;
+        if (sample.touch != touch_ && sample.phase != Phase::Down && sample.phase != Phase::Hover)
+            return false; // Late up/move/cancel from another device cannot cancel a stroke.
         if (sample.phase == Phase::Cancel) { release_(); down_ = false; return true; }
+        if (sample.touch != touch_) {
+            release_(); down_ = false; touch_ = sample.touch;
+        }
         auto point = MapPoint(sample.position, surface_,
                               {double(target_.width), double(target_.height)}, mapping_);
         if (!point) { release_(); down_ = false; return false; }
@@ -134,5 +140,6 @@ private:
     uint64_t generation_ = 0, lastSequence_ = 0;
     Clock::time_point lastSeen_{};
     bool down_ = false;
+    bool touch_ = false;
 };
 } // namespace od::web
