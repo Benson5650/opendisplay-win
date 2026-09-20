@@ -121,9 +121,23 @@ void IdentifyDisplays()
     if (!g_identifying.compare_exchange_strong(expected, true)) return;
 
     std::thread([] {
+        HDESK hDesk = OpenDesktopW(L"default", 0, FALSE,
+            DESKTOP_CREATEMENU | DESKTOP_CREATEWINDOW | DESKTOP_ENUMERATE |
+            DESKTOP_HOOKCONTROL | DESKTOP_READOBJECTS | DESKTOP_WRITEOBJECTS);
+        if (!hDesk) {
+            hDesk = OpenInputDesktop(0, FALSE, GENERIC_ALL);
+        }
+        if (hDesk) {
+            SetThreadDesktop(hDesk);
+        }
+
         struct ScopeExit {
-            ~ScopeExit() { g_identifying = false; }
-        } exitGuard;
+            HDESK desk{};
+            ~ScopeExit() {
+                g_identifying = false;
+                if (desk) CloseDesktop(desk);
+            }
+        } exitGuard{hDesk};
 
         std::vector<DisplayInfo> displays;
         try {
