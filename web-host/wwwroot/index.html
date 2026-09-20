@@ -8,11 +8,12 @@
 <label id="targetField">控制的 Windows 螢幕 <select id="target"><option value="">請選擇螢幕</option></select></label>
 <div id="panelFields" hidden><label>延伸螢幕寬度（像素）<input id="panelWidth" type="number" min="640" max="4096" step="2" value="2360"></label><label>延伸螢幕高度（像素）<input id="panelHeight" type="number" min="480" max="4096" step="2" value="1640"></label><p>此解析度必須先在 Windows 註冊。旋轉 iPad 時會自動交換寬高並重建 Extend。</p></div>
 <label>映射方式 <select id="mapping"><option value="preserve">保持比例（建議）</option><option value="stretch">使用整個表面（拉伸）</option></select></label>
+<div id="penFields"><label>手寫板背景 <select id="penBackground"><option value="dark">深色</option><option value="black">純黑</option><option value="white">白色</option></select></label><label class="check"><input id="showActiveArea" type="checkbox" checked>顯示有效區邊界</label><label class="check"><input id="showHover" type="checkbox" checked>顯示 Apple Pencil Hover 指示器</label></div>
 <label id="fpsField" hidden>影片幀率 <select id="fps"><option value="30">30 FPS</option><option value="60">60 FPS</option></select></label>
 <label id="qualityField" hidden>影片品質 <select id="quality"><option value="balanced">平衡 · 12 Mbps</option><option value="fast">省頻寬 · 4 Mbps</option><option value="high">高畫質 · 24 Mbps</option></select></label>
 <label>手指輸入 <select id="fingerMode"><option value="off">關閉（預設）</option><option value="trackpad">Touchpad · 相對移動與手勢</option><option value="touch">觸控螢幕 · Windows Touch</option></select></label>
 <label id="sensitivityField" hidden>Touchpad 靈敏度 <select id="trackpadSensitivity"><option value="slow">慢速 · 0.75×</option><option value="normal" selected>標準 · 1.25×</option><option value="fast">快速 · 2×</option></select></label>
 <label>壓力曲線 <select id="pressureCurve"><option value="linear">原始壓力</option><option value="soft">輕壓即可加粗</option><option value="firm">重壓才加粗</option></select></label>
 <button id="start">開始</button><button id="refresh">重新整理螢幕</button><button id="forget">忘記此裝置</button><p>Touchpad：單指移動／點按、雙點與拖曳、雙指捲動／右鍵。觸控螢幕：最多五指直接傳給 Windows。Pencil 使用時會抑制手掌誤觸。</p></section>
-<section id="tablet" hidden><div class="toolbar"><span id="destination"></span><button id="stop">停止</button></div><div id="surface"><div id="activeArea"></div><span class="hint">看著電腦螢幕，在這裡書寫<br>不傳送桌面影像，也不顯示本地筆跡</span></div></section>
+<section id="tablet" hidden><div class="toolbar"><span id="destination"></span><button id="stop">停止</button></div><div id="surface" data-background="dark"><div id="activeArea"></div><div id="hoverIndicator" hidden></div><span class="hint">看著電腦螢幕，在這裡書寫<br>不傳送桌面影像，也不顯示本地筆跡</span></div></section>
 </main><script type="module" src="/app.js"></script></body></html>

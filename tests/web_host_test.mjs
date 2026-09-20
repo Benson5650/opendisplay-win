@@ -24,7 +24,10 @@ try {
   let r;
   for(let i=0;i<100;i++){try{r=await fetch(origin);break;}catch{await delay(50);}}
   check(r?.status===200,'trusted TLS and static shell');
-  check((await r.text()).includes('Pen Tablet'),'page content');
+  const shell=await r.text();
+  check(shell.includes('Pen Tablet'),'page content');
+  check(shell.includes('penBackground')&&shell.includes('showActiveArea'),'pen tablet appearance controls');
+  check(shell.includes('showHover')&&shell.includes('hoverIndicator'),'Apple Pencil hover controls');
   const style=await (await fetch(origin+'/style.css')).text();
   check(style.includes('100svh')&&!style.includes('100dvh'),'stable iPad viewport does not resize on Safari toolbar changes');
   check((await fetch(origin+'/displays')).status===401,'display enumeration requires auth');

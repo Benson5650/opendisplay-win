@@ -1,9 +1,11 @@
 'use strict';
 import {VideoReceiver} from './video.mjs';
-import {orientDimensions,surfaceChanged} from './geometry.mjs';
+import {orientDimensions,pointInsideSurface,surfaceChanged} from './geometry.mjs';
 import {sanitizePreferences} from './preferences.mjs';
 import {FingerController} from './finger.mjs';
+import {rememberedDisplay,sanitizeDisplayMemory} from './display-memory.mjs';
 let sessionSurface,activeSession,pendingSession;
+let displayMemory={};
 let fingerController,lastPenAt=-Infinity;
 let videoSocket,videoReceiver,stopping=false,startInFlight=false,queuedRestartReason,resizeTimer,testMode=false;
 const $ = id => document.getElementById(id);
@@ -16,8 +18,10 @@ function updateMode() {
   $('panelFields').hidden=mode!=='extend';
   $('fpsField').hidden=mode==='pen';
   $('qualityField').hidden=mode==='pen';
+  $('penFields').hidden=mode!=='pen';
   $('mapping').disabled=mode!=='pen';
   if(mode!=='pen')$('mapping').value='preserve';
+  restoreTarget();
 }
 $('mode').onchange=updateMode;
 function updateFingerMode(){ $('sensitivityField').hidden=$('fingerMode').value!=='trackpad'; }
@@ -32,10 +36,24 @@ $('forget').onclick=async()=>{
 };
 try {
   const saved=sanitizePreferences(JSON.parse(localStorage.getItem('od-preferences')||'{}'));
-  for(const [key,value] of Object.entries(saved))$(key).value=value;
+  for(const [key,value] of Object.entries(saved)){
+    if(typeof value==='boolean')$(key).checked=value;else $(key).value=value;
+  }
 } catch {}
+try { displayMemory=sanitizeDisplayMemory(JSON.parse(localStorage.getItem('od-last-displays')||'{}')); } catch {}
 updateMode();
 updateFingerMode();
+function restoreTarget(){
+  if(!$('target'))return;
+  $('target').value=rememberedDisplay(displayMemory,$('mode').value,displays);
+}
+function saveTarget(){
+  const mode=$('mode').value,id=$('target').value;
+  if(mode!=='pen'&&mode!=='mirror')return;
+  if(id)displayMemory[mode]=id;else delete displayMemory[mode];
+  try { localStorage.setItem('od-last-displays',JSON.stringify(displayMemory)); } catch {}
+}
+$('target').onchange=saveTarget;
 async function post(path, value) {
   const r = await fetch(path, {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(value)});
   if (!r.ok) throw new Error(`請求失敗 (${r.status})，請檢查主機配對狀態。`);
@@ -47,6 +65,7 @@ async function refresh() {
   displays = await r.json();
   $('target').replaceChildren(new Option('請選擇螢幕', ''));
   for (const d of displays) $('target').add(new Option(`${d.name} · ${d.width} × ${d.height}${d.primary?' · 主螢幕':''}`, d.id));
+  restoreTarget();
   $('pairing').hidden = true; $('settings').hidden = false;
   status('已配對。請明確選擇要控制的螢幕。');
 }
@@ -81,6 +100,7 @@ function stop(message = '已停止。可重新選擇螢幕。') {
   videoReceiver?.close(); videoReceiver=undefined;
   const oldVideo=videoSocket;videoSocket=undefined;oldVideo?.close();
   document.getElementById('videoCanvas')?.remove();
+  $('hoverIndicator').hidden=true;
   document.querySelector('.hint').hidden=false;
   generation = 0; pointer = null; clearInterval(heartbeat);
   if (oldControl?.readyState === WebSocket.OPEN) oldControl.send(JSON.stringify({type:'stop'}));
@@ -94,6 +114,7 @@ function teardownGeneration(){
   const receiver=videoReceiver;videoReceiver=undefined;receiver?.close();
   const oldVideo=videoSocket;videoSocket=undefined;oldVideo?.close();
   document.getElementById('videoCanvas')?.remove();
+  $('hoverIndicator').hidden=true;
   document.querySelector('.hint').hidden=false;
   generation=0;sequence=0;pointer=null;clearInterval(heartbeat);
 }
@@ -112,6 +133,8 @@ function requestSession(reason){
   }
   teardownGeneration();
   sessionSurface={width:bounds.width,height:bounds.height};
+  $('surface').dataset.background=activeSession.mode==='pen'?activeSession.penBackground:'dark';
+  $('activeArea').hidden=!activeSession.showActiveArea;
   Object.assign($('activeArea').style,{width:`${width}px`,height:`${height}px`,left:`${(bounds.width-width)/2}px`,top:`${(bounds.height-height)/2}px`});
   const modeName=activeSession.mode==='extend'?'Extend':activeSession.mode==='mirror'?'Mirror':'Pen Tablet';
   const resolution=activeSession.mode==='extend'?` · ${panel.width} × ${panel.height}`:'';
@@ -127,7 +150,8 @@ function requestSession(reason){
 $('start').onclick = async () => {
   try {
     const saved={};
-    for(const key of ['mode','mapping','fps','quality','pressureCurve','trackpadSensitivity','panelWidth','panelHeight'])saved[key]=$(key).value;
+    for(const key of ['mode','mapping','fps','quality','pressureCurve','trackpadSensitivity','panelWidth','panelHeight','penBackground'])saved[key]=$(key).value;
+    saved.showActiveArea=$('showActiveArea').checked;saved.showHover=$('showHover').checked;
     localStorage.setItem('od-preferences',JSON.stringify(sanitizePreferences(saved)));
   } catch {}
   stopping=false;
@@ -140,9 +164,11 @@ $('start').onclick = async () => {
   }
   const display = mode==='extend'?{id:'',name:'新的延伸螢幕',width:panelWidth,height:panelHeight}:displays.find(d=>d.id === $('target').value);
   if (!display) { status('請先選擇目標螢幕。'); return; }
+  saveTarget();
   activeSession={mode,display,panelWidth,panelHeight,mapping:$('mapping').value,fps:Number($('fps').value),
     quality:$('quality').value,pressureCurve:$('pressureCurve').value,fingerMode:$('fingerMode').value,
-    trackpadSensitivity:$('trackpadSensitivity').value};
+    trackpadSensitivity:$('trackpadSensitivity').value,penBackground:$('penBackground').value,
+    showActiveArea:$('showActiveArea').checked,showHover:$('showHover').checked};
   $('start').disabled = true; $('tablet').hidden = false;
   document.body.classList.add('writing');
   const ws = new WebSocket(`${wsOrigin}/control`); socket = ws;
@@ -198,6 +224,14 @@ function fingerPoint(e){
   const r=surface.getBoundingClientRect();
   return {x:e.clientX-r.left,y:e.clientY-r.top};
 }
+function updateHoverIndicator(e,visible){
+  const indicator=$('hoverIndicator');
+  if(!visible||!activeSession?.showHover||!generation){indicator.hidden=true;return;}
+  const point=pointInsideSurface(e.clientX,e.clientY,surface.getBoundingClientRect());
+  if(!point){indicator.hidden=true;return;}
+  const {x,y}=point;
+  indicator.style.transform=`translate(${x}px,${y}px)`;indicator.hidden=false;
+}
 surface.addEventListener('pointerdown',e=>{
   if(e.pointerType!=='touch'||!fingerController||!generation)return;
   e.preventDefault();
@@ -210,18 +244,20 @@ surface.addEventListener('pointerup',e=>{if(e.pointerType==='touch'&&fingerContr
 for(const name of ['pointercancel','lostpointercapture'])surface.addEventListener(name,e=>{if(e.pointerType==='touch'&&fingerController){const {x,y}=fingerPoint(e);fingerController.up(e.pointerId,x,y,e.timeStamp,true);}});
 surface.addEventListener('pointerdown',e=> {
   e.preventDefault(); if(e.pointerType!=='pen'||pointer!==null||!generation)return;
-  pointer=e.pointerId; surface.setPointerCapture(pointer); sample(e,0);
+  updateHoverIndicator(e,false);pointer=e.pointerId;surface.setPointerCapture(pointer);sample(e,0);
 });
+surface.addEventListener('pointerenter',e=>{if(e.pointerType==='pen'&&pointer===null&&generation){e.preventDefault();sample(e,3);updateHoverIndicator(e,true);}});
 surface.addEventListener('pointermove',e=> {
   if(e.pointerType!=='pen')return; e.preventDefault();
   if(pointer!==null && pointer!==e.pointerId)return;
   const batch=e.getCoalescedEvents?.();
   for(const point of batch?.length?batch:[e]) sample(point,pointer===e.pointerId?1:3);
+  updateHoverIndicator(e,pointer===null);
 });
-surface.addEventListener('pointerup',e=>{if(e.pointerId===pointer){sample(e,2);pointer=null;}});
-surface.addEventListener('pointercancel',e=>{if(e.pointerId===pointer){sample(e,4);pointer=null;}});
-surface.addEventListener('lostpointercapture',e=>{if(e.pointerId===pointer){sample(e,4);pointer=null;}});
-surface.addEventListener('pointerleave',e=>{if(e.pointerType==='pen'&&pointer===null)sample(e,4);});
+surface.addEventListener('pointerup',e=>{if(e.pointerId===pointer){sample(e,2);pointer=null;updateHoverIndicator(e,true);}});
+surface.addEventListener('pointercancel',e=>{if(e.pointerId===pointer){sample(e,4);pointer=null;}updateHoverIndicator(e,false);});
+surface.addEventListener('lostpointercapture',e=>{if(e.pointerId===pointer){sample(e,4);pointer=null;}updateHoverIndicator(e,false);});
+surface.addEventListener('pointerleave',e=>{if(e.pointerType==='pen'&&pointer===null)sample(e,4);if(e.pointerType==='pen')updateHoverIndicator(e,false);});
 surface.addEventListener('contextmenu',e=>e.preventDefault());
 $('stop').onclick=()=>stop(); $('refresh').onclick=()=>refresh().catch(e=>status(e.message));
 document.addEventListener('visibilitychange',()=>{if(document.hidden&&socket)stop('切到背景，已停止輸入。');});

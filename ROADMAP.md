@@ -82,18 +82,15 @@ Depends on item 1 (a signed driver).
 Some from the [#65](https://github.com/peetzweg/opendisplay/issues/65)
 component-mapping, some ours:
 
-- **TODO: Apple Pencil Hover support (Web/iPad).** The control protocol and
-  Windows synthetic-pen path already understand hover, but the Web client still
-  needs end-to-end validation on a hover-capable iPad/Apple Pencil combination.
-  Detect hover-only pen movement without requiring contact, preserve azimuth and
-  altitude, map enter/move/leave into Windows pen in-range/update/out-of-range
-  events, expose an optional hover cursor, and add tests for Pencil takeover,
-  display edges, rotation, backgrounding and disconnect cleanup.
-- **TODO: Remember the last selected Windows display.** Persist the explicit
-  display ID separately for Pen Tablet and Mirror, restore it only when that
-  exact ID is still present after `/displays` refresh, and otherwise leave the
-  selector empty. Never fall back to another monitor or auto-start a session;
-  Extend remains unaffected because it creates its own display.
+- **Apple Pencil Hover support (Web/iPad) — implementation ready; hardware
+  acceptance remains TODO.** Hover-only enter/move/leave events now reach the
+  Windows synthetic-pen path with azimuth and altitude, and the Web client has
+  an optional local hover cursor plus cleanup on contact, exit, rotation,
+  backgrounding and disconnect. Validate it on a hover-capable iPad/Pencil.
+- ~~**Remember the last selected Windows display**~~ — **done.** Pen Tablet and
+  Mirror persist separate explicit display IDs and restore only an exact ID
+  still returned by `/displays`; they never fall back to another monitor or
+  auto-start. Extend remains unaffected because it creates its own display.
 - **mDNS/Bonjour discovery** — half done. `src/net/Mdns.cpp` browses
   `_opensidecar._tcp` (a hand-rolled query, no Bonjour SDK) and the tray already
   uses it to name the iPads. What's left is the UX: offer the found receivers as

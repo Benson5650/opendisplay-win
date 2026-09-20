@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import {orientDimensions,surfaceChanged} from '../web-host/wwwroot/geometry.mjs';
+import {orientDimensions,pointInsideSurface,surfaceChanged} from '../web-host/wwwroot/geometry.mjs';
 const initial={width:1000,height:700};
 assert.equal(surfaceChanged(undefined,initial),false);
 assert.equal(surfaceChanged(initial,{width:1000,height:700}),false);
@@ -10,4 +10,9 @@ assert.equal(surfaceChanged(initial,{width:NaN,height:700}),true);
 assert.deepEqual(orientDimensions(2360,1640,{width:1000,height:700}),{width:2360,height:1640});
 assert.deepEqual(orientDimensions(2360,1640,{width:700,height:1000}),{width:1640,height:2360});
 assert.deepEqual(orientDimensions(1640,2360,{width:1000,height:700}),{width:2360,height:1640});
-console.log('9 surface geometry checks passed');
+const bounds={left:10,top:20,width:100,height:50};
+assert.deepEqual(pointInsideSurface(60,45,bounds),{x:50,y:25});
+assert.deepEqual(pointInsideSurface(10,20,bounds),{x:0,y:0});
+assert.equal(pointInsideSurface(9,45,bounds),undefined);
+assert.equal(pointInsideSurface(NaN,45,bounds),undefined);
+console.log('13 surface geometry checks passed');
