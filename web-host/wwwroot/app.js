@@ -2,8 +2,9 @@
 import {VideoReceiver} from './video.mjs';
 import {surfaceChanged} from './geometry.mjs';
 import {sanitizePreferences} from './preferences.mjs';
+import {FingerController} from './finger.mjs';
 let sessionSurface;
-let finger=null,lastPenAt=-Infinity;
+let fingerController,lastPenAt=-Infinity;
 let videoSocket, videoReceiver, stopping=false;
 const $ = id => document.getElementById(id);
 const wsOrigin=location.origin.replace(/^http/, 'ws');
@@ -19,6 +20,8 @@ function updateMode() {
   if(mode!=='pen')$('mapping').value='preserve';
 }
 $('mode').onchange=updateMode;
+function updateFingerMode(){ $('sensitivityField').hidden=$('fingerMode').value!=='trackpad'; }
+$('fingerMode').onchange=updateFingerMode;
 $('forget').onclick=async()=>{
   if(!confirm('撤銷此瀏覽器的配對？下次需要重新輸入配對碼。'))return;
   try {
@@ -32,6 +35,7 @@ try {
   for(const [key,value] of Object.entries(saved))$(key).value=value;
 } catch {}
 updateMode();
+updateFingerMode();
 async function post(path, value) {
   const r = await fetch(path, {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(value)});
   if (!r.ok) throw new Error(`請求失敗 (${r.status})，請檢查主機配對狀態。`);
@@ -68,8 +72,8 @@ function send(m) {
 function stop(message = '已停止。可重新選擇螢幕。') {
   if(stopping)return;
   stopping=true;
+  fingerController?.cancelAll();fingerController=undefined;
   sessionSurface=undefined;
-  finger=null;
   status(message);
   console.info('OpenDisplay stopped:',message);
   const oldControl=socket;socket=undefined;
@@ -87,7 +91,7 @@ function stop(message = '已停止。可重新選擇螢幕。') {
 $('start').onclick = async () => {
   try {
     const saved={};
-    for(const key of ['mode','mapping','fps','quality','pressureCurve','panelWidth','panelHeight'])saved[key]=$(key).value;
+    for(const key of ['mode','mapping','fps','quality','pressureCurve','trackpadSensitivity','panelWidth','panelHeight'])saved[key]=$(key).value;
     localStorage.setItem('od-preferences',JSON.stringify(sanitizePreferences(saved)));
   } catch {}
   stopping=false;
@@ -112,7 +116,7 @@ $('start').onclick = async () => {
   }
   Object.assign($('activeArea').style,{width:`${width}px`,height:`${height}px`,left:`${(surface.width-width)/2}px`,top:`${(surface.height-height)/2}px`});
   const ws = new WebSocket(`${wsOrigin}/control`); socket = ws;
-  ws.onopen = () => send({type:'start',mode,quality:$('quality').value,pressureCurve:$('pressureCurve').value,touch:$('touchEnabled').checked,panelWidth,panelHeight,fps:Number($('fps').value),target:display.id,width:surface.width,height:surface.height,mapping:$('mapping').value});
+  ws.onopen = () => send({type:'start',mode,quality:$('quality').value,pressureCurve:$('pressureCurve').value,fingerMode:$('fingerMode').value,trackpadSensitivity:$('trackpadSensitivity').value,panelWidth,panelHeight,fps:Number($('fps').value),target:display.id,width:surface.width,height:surface.height,mapping:$('mapping').value});
   ws.onmessage = e => {
     if (socket !== ws) return;
     const m = JSON.parse(e.data);
@@ -120,6 +124,7 @@ $('start').onclick = async () => {
     if (m.type === 'started') {
       if (!m.generation) { stop(m.error==='EXTEND_UNAVAILABLE_REGISTER_RESOLUTION_LOCALLY'?'Extend 無法建立：請先在 Windows 註冊此解析度並確認 Parsec 驅動。':'目標螢幕或映射無效。'); return; }
       generation=m.generation; sequence=0;
+      fingerController=new FingerController($('fingerMode').value,message=>send({...message,generation,sequence:++sequence}));
       heartbeat=setInterval(()=>send({type:'heartbeat',generation}),500);
       if(m.videoTicket){
         const canvas=document.createElement('canvas');canvas.id='videoCanvas';
@@ -142,7 +147,7 @@ $('start').onclick = async () => {
   try { wakeLock = await navigator.wakeLock?.request('screen'); } catch {}
 };
 function sample(e, phase) {
-  lastPenAt=performance.now();finger=null;
+  lastPenAt=performance.now();fingerController?.cancelAll();
   if (!generation) return;
   const r=$('surface').getBoundingClientRect();
   let az=e.azimuthAngle, alt=e.altitudeAngle;
@@ -154,21 +159,20 @@ function sample(e, phase) {
     pressure:phase===0||phase===1?e.pressure:0,azimuth:az,altitude:alt});
 }
 const surface=$('surface');
-function touchSample(e,phase){
-  if(!generation)return;
+function fingerPoint(e){
   const r=surface.getBoundingClientRect();
-  send({type:'touch',generation,sequence:++sequence,phase,x:e.clientX-r.left,y:e.clientY-r.top});
+  return {x:e.clientX-r.left,y:e.clientY-r.top};
 }
 surface.addEventListener('pointerdown',e=>{
-  if(e.pointerType!=='touch'||!$('touchEnabled').checked||!generation)return;
+  if(e.pointerType!=='touch'||!fingerController||!generation)return;
   e.preventDefault();
-  if(finger!==null){touchSample(e,4);finger=null;return;}
   if(pointer!==null||performance.now()-lastPenAt<700)return;
-  finger=e.pointerId;surface.setPointerCapture(finger);touchSample(e,0);
+  const {x,y}=fingerPoint(e);
+  if(fingerController.down(e.pointerId,x,y,e.timeStamp))surface.setPointerCapture(e.pointerId);
 });
-surface.addEventListener('pointermove',e=>{if(e.pointerType==='touch'&&e.pointerId===finger)touchSample(e,1);});
-surface.addEventListener('pointerup',e=>{if(e.pointerId===finger){touchSample(e,2);finger=null;}});
-for(const name of ['pointercancel','lostpointercapture'])surface.addEventListener(name,e=>{if(e.pointerId===finger){touchSample(e,4);finger=null;}});
+surface.addEventListener('pointermove',e=>{if(e.pointerType==='touch'&&fingerController){const {x,y}=fingerPoint(e);fingerController.move(e.pointerId,x,y,e.timeStamp);}});
+surface.addEventListener('pointerup',e=>{if(e.pointerType==='touch'&&fingerController){const {x,y}=fingerPoint(e);fingerController.up(e.pointerId,x,y,e.timeStamp);}});
+for(const name of ['pointercancel','lostpointercapture'])surface.addEventListener(name,e=>{if(e.pointerType==='touch'&&fingerController){const {x,y}=fingerPoint(e);fingerController.up(e.pointerId,x,y,e.timeStamp,true);}});
 surface.addEventListener('pointerdown',e=> {
   e.preventDefault(); if(e.pointerType!=='pen'||pointer!==null||!generation)return;
   pointer=e.pointerId; surface.setPointerCapture(pointer); sample(e,0);

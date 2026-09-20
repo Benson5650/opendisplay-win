@@ -14,7 +14,8 @@ application is not replaced by development builds.
 - Transport-independent PenTabletSession: explicit target selection, generation
   and sequence checks, cancellation, active-area exit, target removal/geometry
   changes, and a two-second heartbeat timeout. No video/VDD objects are used.
-- Native injector teardown now releases finger-as-mouse drags as well as pen.
+- Native injector teardown releases left/right mouse buttons, all synthetic
+  touch contacts, and pen state.
 
 Build with Visual Studio 2026 and CMake:
 
@@ -44,9 +45,10 @@ mode switches or automatically redirect input after a target disappears.
    paired-devices.json, alongside the host. HttpOnly cookies survive restart.
    Global revoke persists, and each browser can revoke only its own credential.
 3. Mirror uses explicit display selection, complete H.264 access units, WebCodecs,
-   bounded queues, IDR recovery and letterbox mapping. Optional single-finger
-   mouse control is suppressed while Pencil is active. Loopback integration
-   verifies actual capture, H.264 transport and touch routing.
+   bounded queues, IDR recovery and letterbox mapping. Finger input can be off,
+   a target-bounded relative Touchpad, or five-contact Windows Touch. Both are
+   cancelled and suppressed while Pencil is active. Loopback integration verifies
+   actual capture, H.264 transport and input routing.
 4. Extend is connected through existing Parsec VDD. Loopback tests create a
    registered 2360x1640 monitor, receive H.264, then verify restoration of the
    original active-display identities. Native pv3 runtime regression remains.
@@ -94,8 +96,10 @@ rotation restart, or an installer.
 The native core uses serialized bridge calls. A 100ms timer stops input on target
 loss/geometry change or a two-second silence; PWA sends 500ms heartbeats. Entering
 background, resizing, pointer cancellation and losing capture terminate strokes.
-Coalesced actual Pencil events are sent; predicted events are not. Optional
-single-finger input maps to mouse click/drag and is disabled by default.
+Coalesced actual Pencil events are sent; predicted events are not. Finger input
+defaults off. Touchpad supports move, tap, double-tap drag, two-finger natural
+scroll and right-click; direct touch uses a PT_TOUCH synthetic device for up to
+five contacts.
 
 Automated integration (no desktop input; CA validation stays enabled):
 
@@ -107,8 +111,8 @@ node tests/web_host_test.mjs
 
 Set `OD_TEST_MIRROR=1` to additionally capture the first active display over
 loopback (memory only, no saved frames) and check the video ticket, IDR/SPS,
-geometry, keyframe request, ticket invalidation, and single-finger mouse event
-routing while video continues. Input remains dry-run.
+geometry, keyframe request, ticket invalidation, Trackpad actions, five-contact
+Touch lifecycle and Pencil takeover while video continues. Input remains dry-run.
 Run `node tests/video_packet_test.mjs` and `node tests/video_receiver_test.mjs`
 for packet and simulated decoder lifecycle tests. These do not prove Safari
 hardware decoding. Mirror currently preserves aspect ratio and captures native
@@ -133,9 +137,9 @@ command using administrator approval. Keep the web host un-elevated.
 
 `OD_TEST_EXTEND=1` runs the integration test against the existing registered
 2360x1640 mode. This temporarily changes desktop topology; do not run while a
-critical display task is active. Current observed result: 41 integration checks
-passed, including IDR/SPS, touch routing, geometry and restored original active
-displays. `OD_TEST_MIRROR=1` observed 40 checks passed. Both use dry-run input, trusted TLS,
+critical display task is active. Current observed result: 55 integration checks
+passed, including IDR/SPS, Touchpad/direct-touch routing, geometry and restored
+original active displays. `OD_TEST_MIRROR=1` observed 54 checks passed. Both use dry-run input, trusted TLS,
 and loopback video only. Neither test validates Safari rendering or pen accuracy.
 
 Unfinished product features remain explicitly out of the current preview: QR

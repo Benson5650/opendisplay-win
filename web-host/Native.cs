@@ -5,6 +5,9 @@ internal static class Native
 {
     private const string Lib = "opendisplay-native";
     [DllImport(Lib, CallingConvention = CallingConvention.Cdecl)] public static extern int od_touch(nint h, ulong g, ulong seq, int phase, double x, double y);
+    [DllImport(Lib, CallingConvention = CallingConvention.Cdecl)] public static extern int od_trackpad(nint h, ulong g, ulong seq, int action, double x, double y);
+    [DllImport(Lib, CallingConvention = CallingConvention.Cdecl)] public static extern int od_direct_touch(nint h, ulong g, ulong seq, uint contactId, int phase, double x, double y);
+    [DllImport(Lib, CallingConvention = CallingConvention.Cdecl)] public static extern void od_cancel_finger(nint h);
     [DllImport(Lib, CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Unicode)] public static extern nint od_extend_create(uint width, uint height, StringBuilder id, int capacity);
     [DllImport(Lib, CallingConvention = CallingConvention.Cdecl)] public static extern void od_extend_destroy(nint h);
     [DllImport(Lib, CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Unicode)] public static extern nint od_video_create(string id, uint fps, uint bitrate);

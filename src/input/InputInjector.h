@@ -3,6 +3,7 @@
 #include <windows.h>
 
 #include "net/Protocol.h"
+#include "web/FingerInputState.h"
 
 namespace od {
 
@@ -31,9 +32,14 @@ public:
     void SetMonitorRect(const RECT& rect) { monitorRect_ = rect; }
 
     void HandleTouch(const TouchMsg& touch);
+    bool HandleTrackpadMove(double dx, double dy);
+    bool HandleMouseButton(bool right, bool down);
     void HandleScroll(const ScrollMsg& scroll);
+    bool HandleDirectTouch(uint32_t sourceId, web::DirectTouchPhase phase,
+                           std::optional<web::Point> normalizedPosition);
     void HandlePencil(const PencilMsg& pencil);
     void HandleProximity(const ProximityMsg& proximity);
+    void EndFingerSession();
 
     // Call when a connection ends. The pen device outlives a reconnect, so a
     // link that drops mid-stroke would otherwise leave the injected pen in
@@ -43,11 +49,23 @@ public:
 private:
     POINT ScreenPoint(double nx, double ny) const;
     bool EnsurePenDevice();
+    bool EnsureTouchDevice();
     void InjectPen(UINT32 flags, POINT pt, double pressure, double azimuth, double altitude);
+    bool InjectTouchFrame(const std::vector<web::DirectTouchContact>& frame);
     void ReleasePenIfDown(POINT pt);
 
     RECT monitorRect_{};
-    bool isDown_ = false;
+    bool leftMouseDown_ = false;
+    bool rightMouseDown_ = false;
+    double mouseRemainderX_ = 0.0;
+    double mouseRemainderY_ = 0.0;
+    double wheelRemainderX_ = 0.0;
+    double wheelRemainderY_ = 0.0;
+
+    HSYNTHETICPOINTERDEVICE touchDevice_ = nullptr;
+    bool touchDeviceFailed_ = false;
+    bool touchInjectFailed_ = false;
+    web::DirectTouchState directTouches_;
 
     HSYNTHETICPOINTERDEVICE penDevice_ = nullptr;
     bool penDeviceFailed_ = false; // creation failed once -> stop retrying per event

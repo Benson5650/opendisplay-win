@@ -3,6 +3,7 @@
 #include "display/VirtualDisplay.h"
 #include "display/DisplayCatalog.h"
 #include "input/InputInjector.h"
+#include <cmath>
 #include <memory>
 #include <sstream>
 
@@ -21,6 +22,7 @@ struct Bridge {
     od::InputInjector injector;
     bool dryRun;
     uint64_t emitted = 0;
+    od::web::DirectTouchState dryTouches;
     od::web::PenTabletSession session;
     explicit Bridge(bool dry) : dryRun(dry), session(
         [](const std::wstring& id) -> std::optional<od::web::Target> {
@@ -58,8 +60,18 @@ struct Bridge {
             const double x = s.position.x * (t.width - 1.0) / t.width;
             const double y = s.position.y * (t.height - 1.0) / t.height;
             injector.HandlePencil({phase, x, y, s.pressure, s.azimuth, s.altitude});
-        }, [this] { if (!dryRun) injector.EndSession(); }) {}
+        }, [this] {
+            dryTouches.CancelAll();
+            if (!dryRun) injector.EndSession();
+        }) {}
 };
+
+void SetTarget(Bridge& bridge, const od::web::Target& target)
+{
+    if (!bridge.dryRun)
+        bridge.injector.SetMonitorRect({target.left, target.top,
+            target.left + target.width, target.top + target.height});
+}
 }
 
 // ABI v1. Host must serialize all access to each handle, including destroy.
@@ -129,6 +141,73 @@ API int od_touch(void* handle, uint64_t generation, uint64_t sequence, int phase
     if (!handle || phase < 0 || phase > 4 || phase == 3) return 0;
     return static_cast<Bridge*>(handle)->session.Handle({generation,sequence,od::web::Phase(phase),
         {x,y},0,0,1.5707963267948966,true},od::web::PenTabletSession::Clock::now());
+}
+
+// action: 0 move, 1/2 left down/up, 3/4 right down/up, 5 scroll.
+API int od_trackpad(void* handle, uint64_t generation, uint64_t sequence,
+                    int action, double x, double y) noexcept
+{
+    if (!handle || action < 0 || action > 5 || !std::isfinite(x) || !std::isfinite(y) ||
+        std::abs(x) > 512 || std::abs(y) > 512) return 0;
+    try {
+        auto& bridge = *static_cast<Bridge*>(handle);
+        if (!bridge.session.AcceptAuxiliary(generation, sequence, od::web::PenTabletSession::Clock::now())) return 0;
+        SetTarget(bridge, bridge.session.CurrentTarget());
+        if (bridge.dryRun) { ++bridge.emitted; return 1; }
+        switch (action) {
+            case 0: return bridge.injector.HandleTrackpadMove(x, y) ? 1 : 0;
+            case 1: return bridge.injector.HandleMouseButton(false, true) ? 1 : 0;
+            case 2: return bridge.injector.HandleMouseButton(false, false) ? 1 : 0;
+            case 3: return bridge.injector.HandleMouseButton(true, true) ? 1 : 0;
+            case 4: return bridge.injector.HandleMouseButton(true, false) ? 1 : 0;
+            case 5: bridge.injector.HandleScroll({x, y}); return 1;
+        }
+    } catch (...) {}
+    return 0;
+}
+
+// phase: 0 down, 1 move, 2 up, 3 cancel. Browser contact IDs are remapped
+// internally to the stable 1..5 pointer IDs expected by Windows.
+API int od_direct_touch(void* handle, uint64_t generation, uint64_t sequence,
+                        uint32_t contactId, int phase, double x, double y) noexcept
+{
+    if (!handle || phase < 0 || phase > 3 || !std::isfinite(x) || !std::isfinite(y)) return 0;
+    try {
+        auto& bridge = *static_cast<Bridge*>(handle);
+        if (!bridge.session.AcceptAuxiliary(generation, sequence, od::web::PenTabletSession::Clock::now())) return 0;
+        const auto directPhase = static_cast<od::web::DirectTouchPhase>(phase);
+        std::optional<od::web::Point> normalized;
+        if (directPhase == od::web::DirectTouchPhase::Down || directPhase == od::web::DirectTouchPhase::Move) {
+            auto mapped = bridge.session.MapInput({x, y});
+            if (!mapped) {
+                if (directPhase == od::web::DirectTouchPhase::Move) {
+                    if (bridge.dryRun) bridge.dryTouches.Apply(contactId, od::web::DirectTouchPhase::Cancel, std::nullopt);
+                    else bridge.injector.HandleDirectTouch(contactId, od::web::DirectTouchPhase::Cancel, std::nullopt);
+                }
+                return 0;
+            }
+            const auto& target = bridge.session.CurrentTarget();
+            normalized = od::web::Point{
+                mapped->x * (target.width - 1.0) / target.width,
+                mapped->y * (target.height - 1.0) / target.height};
+        }
+        SetTarget(bridge, bridge.session.CurrentTarget());
+        bool accepted;
+        if (bridge.dryRun)
+            accepted = bridge.dryTouches.Apply(contactId, directPhase, normalized).has_value();
+        else
+            accepted = bridge.injector.HandleDirectTouch(contactId, directPhase, normalized);
+        if (accepted) ++bridge.emitted;
+        return accepted ? 1 : 0;
+    } catch (...) { return 0; }
+}
+
+API void od_cancel_finger(void* handle) noexcept
+{
+    if (!handle) return;
+    auto& bridge = *static_cast<Bridge*>(handle);
+    bridge.dryTouches.CancelAll();
+    if (!bridge.dryRun) bridge.injector.EndFingerSession();
 }
 
 // Video handles are owned by one authenticated control session. Creation only

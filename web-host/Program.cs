@@ -148,7 +148,8 @@ app.Map("/control", async (HttpContext c) => {
         owner = connection;
     }
     var ownedVideos = new List<VideoSession>();
-    bool touchEnabled = false;
+    string fingerMode = "off";
+    double trackpadSensitivity = 1.25;
     bool penContact = false;
     string pressureCurve = "linear";
     long lastPenAt = long.MinValue / 2;
@@ -208,7 +209,14 @@ app.Map("/control", async (HttpContext c) => {
                             pressureCurve = m.TryGetProperty("pressureCurve", out var curveValue) ? curveValue.GetString() ?? "linear" : "linear";
                             _ = PressureCurve.Apply(0, pressureCurve);
                             penContact = false;
-                            touchEnabled = m.TryGetProperty("touch", out var touchValue) && touchValue.GetBoolean();
+                            lastPenAt = long.MinValue / 2;
+                            if (m.TryGetProperty("fingerMode", out var fingerModeValue))
+                                fingerMode = fingerModeValue.GetString() ?? "off";
+                            else
+                                fingerMode = m.TryGetProperty("touch", out var touchValue) && touchValue.GetBoolean() ? "legacy" : "off";
+                            if (fingerMode is not ("off" or "trackpad" or "touch" or "legacy")) throw new JsonException("Invalid finger mode");
+                            var sensitivityName = m.TryGetProperty("trackpadSensitivity", out var sensitivityValue) ? sensitivityValue.GetString() : "normal";
+                            trackpadSensitivity = sensitivityName switch { "slow" => .75, "normal" => 1.25, "fast" => 2.0, _ => throw new JsonException("Invalid trackpad sensitivity") };
                             Native.od_stop(native); CancelVideo(); video = null;
                             var width = m.GetProperty("width").GetDouble(); var height = m.GetProperty("height").GetDouble();
                             var mapping = m.GetProperty("mapping").GetString();
@@ -252,6 +260,7 @@ app.Map("/control", async (HttpContext c) => {
                             response = new { type = "heartbeat", alive }; break;
                         case "pen":
                             lastPenAt = Environment.TickCount64;
+                            Native.od_cancel_finger(native);
                             var ok = Native.od_sample(native, m.GetProperty("generation").GetUInt64(), m.GetProperty("sequence").GetUInt64(),
                                 m.GetProperty("phase").GetInt32(), m.GetProperty("x").GetDouble(), m.GetProperty("y").GetDouble(),
                                 PressureCurve.Apply(m.GetProperty("pressure").GetDouble(),pressureCurve), m.GetProperty("azimuth").GetDouble(), m.GetProperty("altitude").GetDouble());
@@ -261,10 +270,40 @@ app.Map("/control", async (HttpContext c) => {
                         case "touch":
                             var phase = m.GetProperty("phase").GetInt32();
                             var accepted = 0;
-                            if (touchEnabled && !penContact && Environment.TickCount64-lastPenAt > 700)
+                            if (fingerMode == "legacy" && !penContact && Environment.TickCount64-lastPenAt > 700)
                                 accepted = Native.od_touch(native,m.GetProperty("generation").GetUInt64(),m.GetProperty("sequence").GetUInt64(),phase,m.GetProperty("x").GetDouble(),m.GetProperty("y").GetDouble());
                             if (!dryRun) continue;
                             response = new { type="sample",accepted,emitted=Native.od_emitted(native) }; break;
+                        case "trackpad":
+                            var actionName = m.GetProperty("action").GetString();
+                            var action = actionName switch { "move" => 0, "leftDown" => 1, "leftUp" => 2,
+                                "rightDown" => 3, "rightUp" => 4, "scroll" => 5, _ => -1 };
+                            if (action < 0) throw new JsonException("Invalid trackpad action");
+                            var deltaX = m.TryGetProperty("dx", out var dxValue) ? dxValue.GetDouble() : 0;
+                            var deltaY = m.TryGetProperty("dy", out var dyValue) ? dyValue.GetDouble() : 0;
+                            if (!double.IsFinite(deltaX) || !double.IsFinite(deltaY) || Math.Abs(deltaX) > 256 || Math.Abs(deltaY) > 256)
+                                throw new JsonException("Invalid trackpad delta");
+                            var trackpadAccepted = 0;
+                            if (fingerMode == "trackpad" && !penContact && Environment.TickCount64-lastPenAt > 700)
+                                trackpadAccepted = Native.od_trackpad(native, m.GetProperty("generation").GetUInt64(),
+                                    m.GetProperty("sequence").GetUInt64(), action,
+                                    action == 0 ? deltaX * trackpadSensitivity : deltaX,
+                                    action == 0 ? deltaY * trackpadSensitivity : deltaY);
+                            if (!dryRun) continue;
+                            response = new { type="sample",accepted=trackpadAccepted,emitted=Native.od_emitted(native) }; break;
+                        case "directTouch":
+                            var directPhase = m.GetProperty("phase").GetInt32();
+                            if (directPhase is < 0 or > 3) throw new JsonException("Invalid touch phase");
+                            var directX = m.GetProperty("x").GetDouble();
+                            var directY = m.GetProperty("y").GetDouble();
+                            if (!double.IsFinite(directX) || !double.IsFinite(directY)) throw new JsonException("Invalid touch point");
+                            var directAccepted = 0;
+                            if (fingerMode == "touch" && !penContact && Environment.TickCount64-lastPenAt > 700)
+                                directAccepted = Native.od_direct_touch(native, m.GetProperty("generation").GetUInt64(),
+                                    m.GetProperty("sequence").GetUInt64(),m.GetProperty("contactId").GetUInt32(),
+                                    directPhase,directX,directY);
+                            if (!dryRun) continue;
+                            response = new { type="sample",accepted=directAccepted,emitted=Native.od_emitted(native) }; break;
                         default: throw new JsonException("Unknown message");
                     }
                 }

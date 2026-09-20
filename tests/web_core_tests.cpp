@@ -1,4 +1,5 @@
 #include "web/PenTabletSession.h"
+#include "web/FingerInputState.h"
 #include <cstdlib>
 #include <iostream>
 #include <limits>
@@ -99,5 +100,32 @@ int main()
     pen.sequence=5;pen.phase=Phase::Move;
     Check(session.Handle(pen,now), "pen stroke continues after stale touch");
     session.Stop();
+    Check(session.Start(L"monitor-path", surface, Mapping::PreserveAspect, now), "auxiliary session start");
+    const auto auxiliaryGeneration = session.Generation();
+    Check(session.AcceptAuxiliary(auxiliaryGeneration, 1, now), "auxiliary event accepted");
+    Check(!session.AcceptAuxiliary(auxiliaryGeneration, 1, now), "auxiliary duplicate rejected");
+    auto mappedAuxiliary = session.MapInput({500,375});
+    Check(mappedAuxiliary && mappedAuxiliary->x == .5 && mappedAuxiliary->y == .5, "auxiliary shares mapping");
+    Check(!session.AcceptAuxiliary(auxiliaryGeneration-1, 2, now), "old auxiliary generation rejected");
+    session.Stop();
+
+    DirectTouchState contacts;
+    for(uint32_t id=10;id<15;++id) {
+        auto frame=contacts.Apply(id,DirectTouchPhase::Down,Point{double(id)/100,.5});
+        Check(frame && frame->size()==id-9,"touch frame includes all active contacts");
+    }
+    Check(contacts.Size()==5,"five contacts active");
+    Check(!contacts.Apply(99,DirectTouchPhase::Down,Point{.5,.5}),"sixth contact rejected");
+    auto moved=contacts.Apply(10,DirectTouchPhase::Move,Point{.25,.75});
+    Check(moved && moved->front().pointerId==1 && moved->front().change==DirectTouchChange::Update,
+          "touch pointer id stable across move");
+    auto up=contacts.Apply(10,DirectTouchPhase::Up,std::nullopt);
+    Check(up && up->size()==5 && up->front().change==DirectTouchChange::Up &&
+          up->front().position.x==.25 && up->front().position.y==.75,"touch up reuses last point");
+    Check(contacts.Size()==4,"touch up removes contact");
+    Check(contacts.CancelAll().size()==4 && contacts.Size()==0,"cancel releases remaining contacts");
+    auto reused=contacts.Apply(20,DirectTouchPhase::Down,Point{.1,.1});
+    Check(reused && reused->front().pointerId==1,"touch slot reused after release");
+    contacts.CancelAll();
     std::cout << checks << " checks passed\n";
 }

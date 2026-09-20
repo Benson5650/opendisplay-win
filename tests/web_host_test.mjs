@@ -62,6 +62,10 @@ try {
   ws.send({...event,sequence:3});check((await ws.next(m=>m.type==='sample')).accepted===0,'old mapping rejected');
   ws.send({type:'touch',generation:restarted.generation,sequence:4,phase:0,x:500,y:375});
   check((await ws.next(m=>m.type==='sample')).accepted===0,'touch disabled by default');
+  ws.send({type:'trackpad',generation:restarted.generation,sequence:5,action:'move',dx:10,dy:10});
+  check((await ws.next(m=>m.type==='sample')).accepted===0,'trackpad disabled by default');
+  ws.send({type:'directTouch',generation:restarted.generation,sequence:6,contactId:1,phase:0,x:500,y:375});
+  check((await ws.next(m=>m.type==='sample')).accepted===0,'direct touch disabled by default');
   ws.send({type:'start',touch:true,target:displays[0].id,width:1000,height:750,mapping:'stretch'});
   const touchSession=await ws.next(m=>m.type==='started');
   await delay(750);
@@ -74,9 +78,33 @@ try {
   await delay(750);
   ws.send({type:'touch',generation:touchSession.generation,sequence:4,phase:0,x:500,y:375});
   check((await ws.next(m=>m.type==='sample')).accepted===0,'stationary held pen still suppresses palm');
+  ws.send({type:'start',fingerMode:'trackpad',trackpadSensitivity:'slow',target:displays[0].id,width:1000,height:750,mapping:'stretch'});
+  const trackpadSession=await ws.next(m=>m.type==='started');
+  await delay(750);
+  ws.send({type:'trackpad',generation:trackpadSession.generation,sequence:1,action:'move',dx:12,dy:-4});
+  check((await ws.next(m=>m.type==='sample')).accepted===1,'trackpad relative move accepted');
+  ws.send({type:'trackpad',generation:trackpadSession.generation,sequence:2,action:'leftDown'});
+  check((await ws.next(m=>m.type==='sample')).accepted===1,'trackpad button down accepted');
+  ws.send({type:'trackpad',generation:trackpadSession.generation,sequence:3,action:'leftUp'});
+  check((await ws.next(m=>m.type==='sample')).accepted===1,'trackpad button up accepted');
+  ws.send({type:'trackpad',generation:trackpadSession.generation,sequence:3,action:'scroll',dx:0,dy:20});
+  check((await ws.next(m=>m.type==='sample')).accepted===0,'trackpad duplicate sequence rejected');
+  ws.send({type:'start',fingerMode:'touch',trackpadSensitivity:'normal',target:displays[0].id,width:1000,height:750,mapping:'preserve'});
+  const directSession=await ws.next(m=>m.type==='started');
+  await delay(750);
+  for(let contactId=1;contactId<=5;contactId++){
+    ws.send({type:'directTouch',generation:directSession.generation,sequence:contactId,contactId,phase:0,x:300+contactId*20,y:375});
+    check((await ws.next(m=>m.type==='sample')).accepted===1,`direct touch ${contactId} accepted`);
+  }
+  ws.send({type:'directTouch',generation:directSession.generation,sequence:6,contactId:6,phase:0,x:500,y:375});
+  check((await ws.next(m=>m.type==='sample')).accepted===0,'sixth direct touch rejected');
+  ws.send({...event,generation:directSession.generation,sequence:7});
+  check((await ws.next(m=>m.type==='sample')).accepted===1,'pen cancels direct contacts and takes over');
+  ws.send({type:'directTouch',generation:directSession.generation,sequence:8,contactId:1,phase:1,x:500,y:375});
+  check((await ws.next(m=>m.type==='sample')).accepted===0,'direct touch suppressed during pen contact');
   if(process.env.OD_TEST_MIRROR==='1'||process.env.OD_TEST_EXTEND==='1') {
     const extend=process.env.OD_TEST_EXTEND==='1';
-    ws.send({type:'start',mode:extend?'extend':'mirror',touch:true,quality:process.env.OD_TEST_QUALITY||'balanced',panelWidth:2360,panelHeight:1640,fps:30,target:extend?'':displays[0].id,width:1000,height:750,mapping:'preserve'});
+    ws.send({type:'start',mode:extend?'extend':'mirror',fingerMode:'trackpad',trackpadSensitivity:'normal',quality:process.env.OD_TEST_QUALITY||'balanced',panelWidth:2360,panelHeight:1640,fps:30,target:extend?'':displays[0].id,width:1000,height:750,mapping:'preserve'});
     const mirrored=await ws.next(m=>m.type==='started');
     check(mirrored.generation>0&&mirrored.videoTicket,'mirror started with ticket');
     keepalive=setInterval(()=>ws.send({type:'heartbeat',generation:mirrored.generation}),500);
@@ -90,12 +118,12 @@ try {
     check(frame?.key&&codecFromAnnexB(frame.data),'first frame is decodable IDR with SPS');
     check(frame.width===(extend?2360:displays[0].width)&&frame.height===(extend?1640:displays[0].height),'capture matches input target');
     await delay(750);
-    ws.send({type:'touch',generation:mirrored.generation,sequence:1,phase:0,x:250,y:200});
-    check((await ws.next(m=>m.type==='sample')).accepted===1,'single-finger mouse down accepted while video streams');
-    ws.send({type:'touch',generation:mirrored.generation,sequence:2,phase:1,x:300,y:225});
-    check((await ws.next(m=>m.type==='sample')).accepted===1,'single-finger mouse drag accepted while video streams');
-    ws.send({type:'touch',generation:mirrored.generation,sequence:3,phase:2,x:300,y:225});
-    check((await ws.next(m=>m.type==='sample')).accepted===1,'single-finger mouse up accepted while video streams');
+    ws.send({type:'trackpad',generation:mirrored.generation,sequence:1,action:'move',dx:25,dy:10});
+    check((await ws.next(m=>m.type==='sample')).accepted===1,'trackpad move accepted while video streams');
+    ws.send({type:'trackpad',generation:mirrored.generation,sequence:2,action:'leftDown'});
+    check((await ws.next(m=>m.type==='sample')).accepted===1,'trackpad drag begins while video streams');
+    ws.send({type:'trackpad',generation:mirrored.generation,sequence:3,action:'leftUp'});
+    check((await ws.next(m=>m.type==='sample')).accepted===1,'trackpad drag ends while video streams');
     ws.send({type:'keyframe',generation:mirrored.generation});
     let sawKey=false;
     for(let i=0;i<60&&!sawKey;i++) {

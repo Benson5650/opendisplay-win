@@ -81,6 +81,26 @@ public:
         return true;
     }
 
+    // Trackpad and multi-touch share the same generation, ordering, target and
+    // heartbeat contract as pen samples, but keep their own contact state.
+    bool AcceptAuxiliary(uint64_t generation, uint64_t sequence, Clock::time_point now)
+    {
+        Tick(now);
+        if (state_ != SessionState::Active || generation != generation_ ||
+            sequence <= lastSequence_) return false;
+        lastSequence_ = sequence;
+        lastSeen_ = now;
+        return true;
+    }
+
+    std::optional<Point> MapInput(Point point) const
+    {
+        if (state_ != SessionState::Active) return std::nullopt;
+        return MapPoint(point, surface_, {double(target_.width), double(target_.height)}, mapping_);
+    }
+
+    const Target& CurrentTarget() const { return target_; }
+
     bool Handle(Sample sample, Clock::time_point now)
     {
         Tick(now);
