@@ -1,0 +1,10 @@
+import assert from 'node:assert/strict';
+import {surfaceChanged} from '../web-host/wwwroot/geometry.mjs';
+const initial={width:1000,height:700};
+assert.equal(surfaceChanged(undefined,initial),false);
+assert.equal(surfaceChanged(initial,{width:1000,height:700}),false);
+assert.equal(surfaceChanged(initial,{width:1000.25,height:699.75}),false);
+assert.equal(surfaceChanged(initial,{width:1000,height:650}),true);
+assert.equal(surfaceChanged(initial,{width:700,height:1000}),true);
+assert.equal(surfaceChanged(initial,{width:NaN,height:700}),true);
+console.log('6 surface geometry checks passed');

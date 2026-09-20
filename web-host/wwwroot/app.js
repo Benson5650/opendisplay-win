@@ -1,7 +1,10 @@
 'use strict';
 import {VideoReceiver} from './video.mjs';
-let videoSocket, videoReceiver;
+import {surfaceChanged} from './geometry.mjs';
+let sessionSurface;
+let videoSocket, videoReceiver, stopping=false;
 const $ = id => document.getElementById(id);
+const wsOrigin=location.origin.replace(/^http/, 'ws');
 let socket, generation = 0, sequence = 0, pointer = null, wakeLock, displays = [], heartbeat, ticketTimer;
 const status = text => { $('status').textContent = text; };
 function updateMode() {
@@ -48,18 +51,25 @@ function send(m) {
   socket.send(JSON.stringify(m)); return true;
 }
 function stop(message = '已停止。可重新選擇螢幕。') {
+  if(stopping)return;
+  stopping=true;
+  sessionSurface=undefined;
+  status(message);
+  console.info('OpenDisplay stopped:',message);
+  const oldControl=socket;socket=undefined;
   videoReceiver?.close(); videoReceiver=undefined;
   const oldVideo=videoSocket;videoSocket=undefined;oldVideo?.close();
   document.getElementById('videoCanvas')?.remove();
   document.querySelector('.hint').hidden=false;
   generation = 0; pointer = null; clearInterval(heartbeat);
-  if (socket?.readyState === WebSocket.OPEN) socket.send(JSON.stringify({type:'stop'}));
-  socket?.close(); socket = undefined;
+  if (oldControl?.readyState === WebSocket.OPEN) oldControl.send(JSON.stringify({type:'stop'}));
+  oldControl?.close();
   wakeLock?.release().catch(()=>{}); wakeLock = undefined;
   document.body.classList.remove('writing'); $('tablet').hidden = true; $('settings').hidden = false;
   $('start').disabled = false; status(message);
 }
 $('start').onclick = async () => {
+  stopping=false;
   const mode=$('mode').value;
   if(mode!=='pen'&&!('VideoDecoder' in window)){status('此瀏覽器不支援 WebCodecs VideoDecoder。');return;}
   if(mode!=='pen')$('mapping').value='preserve';
@@ -73,13 +83,14 @@ $('start').onclick = async () => {
   document.body.classList.add('writing');
   $('destination').textContent = `${mode==='extend'?'Extend':mode==='mirror'?'Mirror':'Pen Tablet'} → ${display.name}`;
   const surface = $('surface').getBoundingClientRect();
+  sessionSurface={width:surface.width,height:surface.height};
   let width=surface.width, height=surface.height;
   if ($('mapping').value === 'preserve') {
     const scale=Math.min(width/display.width,height/display.height);
     width=display.width*scale; height=display.height*scale;
   }
   Object.assign($('activeArea').style,{width:`${width}px`,height:`${height}px`,left:`${(surface.width-width)/2}px`,top:`${(surface.height-height)/2}px`});
-  const ws = new WebSocket(`${location.origin.replace('https:', 'wss:')}/control`); socket = ws;
+  const ws = new WebSocket(`${wsOrigin}/control`); socket = ws;
   ws.onopen = () => send({type:'start',mode,panelWidth,panelHeight,fps:Number($('fps').value),target:display.id,width:surface.width,height:surface.height,mapping:$('mapping').value});
   ws.onmessage = e => {
     if (socket !== ws) return;
@@ -95,14 +106,14 @@ $('start').onclick = async () => {
         $('surface').prepend(canvas);document.querySelector('.hint').hidden=true;
         const receiver=new VideoReceiver(canvas,generation,()=>send({type:'keyframe',generation}),message=>stop(message));
         videoReceiver=receiver;
-        const vs=new WebSocket(`${location.origin.replace('https:','wss:')}/video?ticket=${encodeURIComponent(m.videoTicket)}`);
+        const vs=new WebSocket(`${wsOrigin}/video?ticket=${encodeURIComponent(m.videoTicket)}`);
         videoSocket=vs;vs.binaryType='arraybuffer';
         vs.onmessage=event=>{if(videoSocket===vs)receiver.receive(event.data);};
         vs.onerror=()=>{if(videoSocket===vs)stop('影片連線失敗。');};
         vs.onclose=()=>{if(videoSocket===vs)stop('影片已中斷，輸入已停止。');};
       }
     }
-    if (m.type === 'state' && m.state >= 2) stop('螢幕已變更或連線逾時，請重新選擇。');
+    if (m.type === 'state' && m.state >= 2) stop(({2:'目標螢幕消失',3:'目標螢幕位置或解析度改變',4:'控制心跳逾時'})[m.state]||`工作階段停止 (${m.state})`);
     if (m.type === 'heartbeat' && !m.alive) stop('工作階段失效，請重新開始。');
   };
   ws.onerror = () => { if(socket===ws) stop('連線失敗；主機可能正由另一個裝置使用。'); };
@@ -138,7 +149,10 @@ surface.addEventListener('pointerleave',e=>{if(e.pointerType==='pen'&&pointer===
 surface.addEventListener('contextmenu',e=>e.preventDefault());
 $('stop').onclick=()=>stop(); $('refresh').onclick=()=>refresh().catch(e=>status(e.message));
 document.addEventListener('visibilitychange',()=>{if(document.hidden&&socket)stop('切到背景，已停止輸入。');});
-window.addEventListener('resize',()=>{if(socket)stop('畫布大小已改變，請重新開始。');});
+window.addEventListener('resize',()=>{
+  if(socket && surfaceChanged(sessionSurface,$('surface').getBoundingClientRect()))
+    stop('畫布大小已改變，請重新開始。');
+});
 window.addEventListener('pagehide',()=>stop());
 if('serviceWorker' in navigator) navigator.serviceWorker.register('/sw.js').catch(()=>{});
 refresh().catch(e=>status(e.message));

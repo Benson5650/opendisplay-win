@@ -10,6 +10,7 @@ internal sealed class VideoSession : IDisposable
     nint handle;
     nint virtualDisplay;
     bool attached;
+    readonly Stopwatch created = Stopwatch.StartNew();
     int cleanupQueued;
     readonly CancellationTokenSource stopped = new();
     public string Ticket { get; } = Convert.ToHexString(System.Security.Cryptography.RandomNumberGenerator.GetBytes(32));
@@ -25,6 +26,9 @@ internal sealed class VideoSession : IDisposable
     public bool Attach()
     {
         lock(gate) { if (attached || handle == 0 || stopped.IsCancellationRequested) return false; attached = true; return true; }
+    }
+    public bool AttachmentTimedOut {
+        get { lock(gate) return !attached && created.Elapsed > TimeSpan.FromSeconds(10); }
     }
     public void RequestKeyFrame() { lock(gate) if(handle != 0) Native.od_video_keyframe(handle); }
     public void Cancel()

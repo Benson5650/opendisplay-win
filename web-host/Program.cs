@@ -11,15 +11,17 @@ var ipText = builder.Configuration["ip"] ?? "127.0.0.1";
 if (!IPAddress.TryParse(ipText, out var ip)) throw new ArgumentException("--ip must be an IP address");
 var port = int.Parse(builder.Configuration["port"] ?? "9443");
 var dryRun = builder.Configuration["dry-run"] == "true";
-var certPath = builder.Configuration["cert"] ?? throw new ArgumentException("--cert PFX is required");
-var cert = X509CertificateLoader.LoadPkcs12FromFile(certPath, Environment.GetEnvironmentVariable("OD_PFX_PASSWORD"));
-if (!cert.HasPrivateKey || !cert.MatchesHostname(ipText, false, false))
+var localTest = builder.Configuration["loopback-test"] == "true";
+if (localTest && (!IPAddress.IsLoopback(ip) || !dryRun)) throw new ArgumentException("Loopback test requires loopback IP and dry-run input");
+var certPath = builder.Configuration["cert"];
+using var cert = localTest ? null : X509CertificateLoader.LoadPkcs12FromFile(certPath ?? throw new ArgumentException("--cert PFX is required"), Environment.GetEnvironmentVariable("OD_PFX_PASSWORD"));
+if (cert != null && (!cert.HasPrivateKey || !cert.MatchesHostname(ipText, false, false)))
     throw new ArgumentException("Certificate must have a private key and matching IP SAN");
-builder.WebHost.ConfigureKestrel(o => o.Listen(ip, port, l => l.UseHttps(cert)));
+builder.WebHost.ConfigureKestrel(o => o.Listen(ip, port, l => { if(cert != null) l.UseHttps(cert); }));
 builder.Logging.ClearProviders(); // Never log pairing credentials or input payloads.
 var app = builder.Build();
 var host = ip.AddressFamily == System.Net.Sockets.AddressFamily.InterNetworkV6 ? $"[{ipText}]:{port}" : $"{ipText}:{port}";
-var origin = $"https://{host}";
+var origin = $"{(localTest ? "http" : "https")}://{host}";
 var gate = new object();
 var native = Native.od_create(dryRun ? 1 : 0);
 if (native == 0) throw new InvalidOperationException("Native initialization failed");
@@ -101,7 +103,7 @@ app.MapPost("/pair/status", async (HttpContext c) => {
         if (!approved) return Results.Json(new { ready = false });
         var token = Convert.ToHexString(RandomNumberGenerator.GetBytes(32));
         tokens.Add(token); pending = null; codeExpires = DateTimeOffset.MinValue;
-        c.Response.Cookies.Append("od-device", token, new CookieOptions { HttpOnly = true, Secure = true, SameSite = SameSiteMode.Strict });
+        c.Response.Cookies.Append("od-device", token, new CookieOptions { HttpOnly = true, Secure = !localTest, SameSite = SameSiteMode.Strict });
         return Results.Json(new { ready = true });
     }
 });
@@ -141,9 +143,17 @@ app.Map("/control", async (HttpContext c) => {
                     lock (gate) {
                         if (!Auth(c)) { Native.od_stop(native); CancelVideo(); shutdown.Cancel(); socket.Abort(); return; }
                         state = Native.od_tick(native);
+                        if (video?.AttachmentTimedOut == true) {
+                            Console.Error.WriteLine("Video attach timeout: browser did not connect within 10s");
+                            Native.od_stop(native); CancelVideo();
+                            shutdown.Cancel(); socket.Abort(); return;
+                        }
                         if (state != 1) CancelVideo();
                     }
-                    if (state != previous) { previous = state; await Send(new { type = "state", state }); }
+                    if (state != previous) {
+                        Console.Error.WriteLine($"Session state: {previous} -> {state}");
+                        previous = state; await Send(new { type = "state", state });
+                    }
                 }
             } catch (OperationCanceledException) {} catch (WebSocketException) { shutdown.Cancel(); }
         }, ct);
@@ -243,6 +253,7 @@ app.Map("/video", async (HttpContext c) => {
         await selected.Stream(socket, c.RequestAborted);
     } catch (Exception e) when (e is OperationCanceledException or WebSocketException or InvalidOperationException) {
         // A failed video connection invalidates input for this generation only.
+        Console.Error.WriteLine($"Video ended: {e.GetType().Name}: {e.Message}");
     } finally {
         lock (gate) {
             if (ReferenceEquals(video, selected)) { Native.od_stop(native); selected.Cancel(); }
@@ -250,4 +261,4 @@ app.Map("/video", async (HttpContext c) => {
     }
 });
 try { await app.RunAsync(); }
-finally { lock (gate) { disposed = true; Native.od_destroy(native); } cert.Dispose(); }
+finally { lock (gate) { disposed = true; Native.od_destroy(native); } }
