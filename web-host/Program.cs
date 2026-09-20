@@ -207,6 +207,8 @@ app.Map("/control", async (HttpContext c) => {
                             if (mode != "pen" && mapping != "preserve") throw new JsonException("Video requires aspect preservation");
                             var fps = m.TryGetProperty("fps", out var fpsValue) ? fpsValue.GetUInt32() : 30;
                             if (fps is not (30 or 60)) throw new JsonException("Unsupported frame rate");
+                            var quality = m.TryGetProperty("quality", out var qualityValue) ? qualityValue.GetString() : "balanced";
+                            uint bitrate = quality switch { "fast" => 4_000_000, "balanced" => 12_000_000, "high" => 24_000_000, _ => throw new JsonException("Invalid quality") };
                             if (width is <= 0 or > 16384 || height is <= 0 or > 16384 || mapping is not ("preserve" or "stretch")) throw new JsonException();
                             var target = m.GetProperty("target").GetString() ?? "";
                             nint ownedDisplay = 0;
@@ -224,7 +226,7 @@ app.Map("/control", async (HttpContext c) => {
                             try {
                             var generation = Native.od_start(native, target, width, height, mapping == "stretch" ? 1 : 0);
                             if (generation != 0 && mode != "pen") {
-                                video = new VideoSession(target, fps, generation, c.Request.Cookies["od-device"]!, ownedDisplay);
+                                video = new VideoSession(target, fps, generation, c.Request.Cookies["od-device"]!, ownedDisplay, bitrate);
                                 ownedDisplay = 0;
                                 ownedVideos.Add(video);
                             }

@@ -133,14 +133,14 @@ API int od_touch(void* handle, uint64_t generation, uint64_t sequence, int phase
 
 // Video handles are owned by one authenticated control session. Creation only
 // accepts a catalog identity; a caller cannot pass an arbitrary GDI source name.
-API void* od_video_create(const wchar_t* id, unsigned fps) noexcept
+API void* od_video_create(const wchar_t* id, unsigned fps, unsigned bitrate) noexcept
 {
-    if (!id || !*id || (fps != 30 && fps != 60)) return nullptr;
+    if (!id || !*id || (fps != 30 && fps != 60) || bitrate < 4'000'000 || bitrate > 24'000'000) return nullptr;
     try {
         for (const auto& display : od::EnumerateDisplays()) {
             if (display.id != id) continue;
             auto video = std::make_unique<od::web::VideoPipeline>();
-            video->Start(display.deviceName, fps);
+            video->Start(display.deviceName, fps, bitrate);
             return video.release();
         }
     } catch (...) {}

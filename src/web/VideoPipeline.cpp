@@ -10,17 +10,17 @@ void VideoPipeline::Stop()
     std::lock_guard lock(mutex_);
     pending_.reset(); state_ = 0; width_ = 0; height_ = 0;
 }
-void VideoPipeline::Start(std::wstring device, unsigned fps)
+void VideoPipeline::Start(std::wstring device, unsigned fps, unsigned bitrate)
 {
     Stop();
-    if (device.empty() || (fps != 30 && fps != 60)) { state_ = -1; return; }
+    if (device.empty() || (fps != 30 && fps != 60) || bitrate < 4'000'000 || bitrate > 24'000'000) { state_ = -1; return; }
     stop_ = false; keyRequested_ = true; state_ = 1;
-    worker_ = std::thread([this, device = std::move(device), fps] {
+    worker_ = std::thread([this, device = std::move(device), fps, bitrate] {
         try {
             H264Encoder encoder; // Destroy after DXGI, before leaving COM thread.
             DesktopDuplication capture;
             if (!capture.Open(device) || capture.Width() % 2 || capture.Height() % 2 ||
-                !encoder.Configure(capture.Width(), capture.Height(), fps, 12'000'000)) {
+                !encoder.Configure(capture.Width(), capture.Height(), fps, bitrate)) {
                 state_ = -1; return;
             }
             width_ = capture.Width(); height_ = capture.Height(); state_ = 2;

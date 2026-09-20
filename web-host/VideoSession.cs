@@ -16,10 +16,10 @@ internal sealed class VideoSession : IDisposable
     public string Ticket { get; } = Convert.ToHexString(System.Security.Cryptography.RandomNumberGenerator.GetBytes(32));
     public string DeviceToken { get; }
     public ulong Generation { get; }
-    public VideoSession(string target, uint fps, ulong generation, string token, nint ownedDisplay = 0)
+    public VideoSession(string target, uint fps, ulong generation, string token, nint ownedDisplay = 0, uint bitrate = 12_000_000)
     {
         Generation = generation; DeviceToken = token;
-        handle = Native.od_video_create(target, fps);
+        handle = Native.od_video_create(target, fps, bitrate);
         if (handle == 0) throw new InvalidOperationException("Video target unavailable");
         virtualDisplay = ownedDisplay;
     }

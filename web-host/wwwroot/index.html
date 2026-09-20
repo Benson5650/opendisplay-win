@@ -9,6 +9,7 @@
 <div id="panelFields" hidden><label>延伸螢幕寬度（像素）<input id="panelWidth" type="number" min="640" max="4096" step="2" value="2360"></label><label>延伸螢幕高度（像素）<input id="panelHeight" type="number" min="480" max="4096" step="2" value="1640"></label><p>此解析度必須先在 Windows 註冊。不是瀏覽器視窗大小；橫直向請自行交換寬高。</p></div>
 <label>映射方式 <select id="mapping"><option value="preserve">保持比例（建議）</option><option value="stretch">使用整個表面（拉伸）</option></select></label>
 <label id="fpsField" hidden>影片幀率 <select id="fps"><option value="30">30 FPS</option><option value="60">60 FPS</option></select></label>
+<label id="qualityField" hidden>影片品質 <select id="quality"><option value="balanced">平衡 · 12 Mbps</option><option value="fast">省頻寬 · 4 Mbps</option><option value="high">高畫質 · 24 Mbps</option></select></label>
 <label><input id="touchEnabled" type="checkbox">啟用單指滑鼠控制（預設關閉，Pencil 使用時抑制）</label>
 <label>壓力曲線 <select id="pressureCurve"><option value="linear">原始壓力</option><option value="soft">輕壓即可加粗</option><option value="firm">重壓才加粗</option></select></label>
 <button id="start">開始</button><button id="refresh">重新整理螢幕</button><p>手指控制預設關閉；啟用後可單指點擊與拖曳。切換模式前請先停止。</p></section>

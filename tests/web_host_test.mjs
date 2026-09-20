@@ -71,7 +71,7 @@ try {
   check((await ws.next(m=>m.type==='sample')).accepted===0,'stationary held pen still suppresses palm');
   if(process.env.OD_TEST_MIRROR==='1'||process.env.OD_TEST_EXTEND==='1') {
     const extend=process.env.OD_TEST_EXTEND==='1';
-    ws.send({type:'start',mode:extend?'extend':'mirror',panelWidth:2360,panelHeight:1640,fps:30,target:extend?'':displays[0].id,width:1000,height:750,mapping:'preserve'});
+    ws.send({type:'start',mode:extend?'extend':'mirror',quality:process.env.OD_TEST_QUALITY||'balanced',panelWidth:2360,panelHeight:1640,fps:30,target:extend?'':displays[0].id,width:1000,height:750,mapping:'preserve'});
     const mirrored=await ws.next(m=>m.type==='started');
     check(mirrored.generation>0&&mirrored.videoTicket,'mirror started with ticket');
     keepalive=setInterval(()=>ws.send({type:'heartbeat',generation:mirrored.generation}),500);

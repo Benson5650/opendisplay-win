@@ -13,6 +13,7 @@ function updateMode() {
   $('targetField').hidden=mode==='extend';
   $('panelFields').hidden=mode!=='extend';
   $('fpsField').hidden=mode==='pen';
+  $('qualityField').hidden=mode==='pen';
   $('mapping').disabled=mode!=='pen';
   if(mode!=='pen')$('mapping').value='preserve';
 }
@@ -93,7 +94,7 @@ $('start').onclick = async () => {
   }
   Object.assign($('activeArea').style,{width:`${width}px`,height:`${height}px`,left:`${(surface.width-width)/2}px`,top:`${(surface.height-height)/2}px`});
   const ws = new WebSocket(`${wsOrigin}/control`); socket = ws;
-  ws.onopen = () => send({type:'start',mode,pressureCurve:$('pressureCurve').value,touch:$('touchEnabled').checked,panelWidth,panelHeight,fps:Number($('fps').value),target:display.id,width:surface.width,height:surface.height,mapping:$('mapping').value});
+  ws.onopen = () => send({type:'start',mode,quality:$('quality').value,pressureCurve:$('pressureCurve').value,touch:$('touchEnabled').checked,panelWidth,panelHeight,fps:Number($('fps').value),target:display.id,width:surface.width,height:surface.height,mapping:$('mapping').value});
   ws.onmessage = e => {
     if (socket !== ws) return;
     const m = JSON.parse(e.data);

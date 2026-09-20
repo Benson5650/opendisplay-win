@@ -12,7 +12,7 @@ namespace od::web {
 class VideoPipeline {
 public:
     ~VideoPipeline() { Stop(); }
-    void Start(std::wstring device, unsigned fps);
+    void Start(std::wstring device, unsigned fps, unsigned bitrate);
     void Stop();
     void RequestKeyFrame() { keyRequested_ = true; }
     std::optional<EncodedFrame> Take();
