@@ -1,5 +1,6 @@
 #include "web/PenTabletSession.h"
 #include "web/FingerInputState.h"
+#include "input/InputMath.h"
 #include <cstdlib>
 #include <iostream>
 #include <limits>
@@ -25,6 +26,11 @@ int main()
                    Mapping::Stretch), "NaN rejected");
     Check(!MapPoint({0, 0}, surface, {1, std::numeric_limits<double>::infinity()},
                    Mapping::PreserveAspect), "infinite size rejected");
+    for(long extent : {1920L,3840L}) for(long pixel=0;pixel<extent;++pixel) {
+        const auto normalized=od::NormalizeAbsoluteCoordinate(pixel-1920,-1920,extent);
+        Check((static_cast<int64_t>(normalized)*extent)/65536==pixel,
+              "absolute mouse pixel round-trip has no left drift");
+    }
     int emitted = 0, released = 0;
     std::optional<Target> display = Target{L"monitor-path", -1600, 0, 1600, 1000};
     Sample last{};
@@ -115,6 +121,7 @@ int main()
         Check(frame && frame->size()==id-9,"touch frame includes all active contacts");
     }
     Check(contacts.Size()==5,"five contacts active");
+    Check(contacts.Updates().size()==5,"stationary touch refresh keeps all contacts active");
     Check(!contacts.Apply(99,DirectTouchPhase::Down,Point{.5,.5}),"sixth contact rejected");
     auto moved=contacts.Apply(10,DirectTouchPhase::Move,Point{.25,.75});
     Check(moved && moved->front().pointerId==1 && moved->front().change==DirectTouchChange::Update,

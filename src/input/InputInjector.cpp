@@ -1,4 +1,5 @@
 #include "input/InputInjector.h"
+#include "input/InputMath.h"
 
 #include <algorithm>
 #include <cmath>
@@ -27,13 +28,6 @@ void DeriveTilt(double azimuth, double altitude, INT32& tiltX, INT32& tiltY)
     tiltY = static_cast<INT32>(std::lround(std::clamp(y, -90.0, 90.0)));
 }
 
-LONG NormalizeToVirtualDesktop(LONG screenCoord, int origin, int extent)
-{
-    if (extent <= 0)
-        return 0;
-    return static_cast<LONG>((static_cast<double>(screenCoord - origin) * 65535.0) / extent);
-}
-
 bool SendMouseInput(DWORD flags, LONG dx = 0, LONG dy = 0, LONG mouseData = 0)
 {
     INPUT input{};
@@ -52,8 +46,8 @@ void InputInjector::HandleTouch(const TouchMsg& touch)
     LONG screenX = monitorRect_.left + static_cast<LONG>(touch.x * (monitorRect_.right - monitorRect_.left));
     LONG screenY = monitorRect_.top + static_cast<LONG>(touch.y * (monitorRect_.bottom - monitorRect_.top));
 
-    LONG normX = NormalizeToVirtualDesktop(screenX, GetSystemMetrics(SM_XVIRTUALSCREEN), GetSystemMetrics(SM_CXVIRTUALSCREEN));
-    LONG normY = NormalizeToVirtualDesktop(screenY, GetSystemMetrics(SM_YVIRTUALSCREEN), GetSystemMetrics(SM_CYVIRTUALSCREEN));
+    LONG normX = NormalizeAbsoluteCoordinate(screenX, GetSystemMetrics(SM_XVIRTUALSCREEN), GetSystemMetrics(SM_CXVIRTUALSCREEN));
+    LONG normY = NormalizeAbsoluteCoordinate(screenY, GetSystemMetrics(SM_YVIRTUALSCREEN), GetSystemMetrics(SM_CYVIRTUALSCREEN));
 
     DWORD moveFlags = MOUSEEVENTF_MOVE | MOUSEEVENTF_ABSOLUTE | MOUSEEVENTF_VIRTUALDESK;
 
@@ -99,8 +93,8 @@ bool InputInjector::HandleTrackpadMove(double dx, double dy)
     const LONG screenY = std::clamp<LONG>(baseY + stepY, minY, maxY);
     if ((screenX == minX && stepX < 0) || (screenX == maxX && stepX > 0)) mouseRemainderX_ = 0;
     if ((screenY == minY && stepY < 0) || (screenY == maxY && stepY > 0)) mouseRemainderY_ = 0;
-    const LONG normX = NormalizeToVirtualDesktop(screenX, GetSystemMetrics(SM_XVIRTUALSCREEN), GetSystemMetrics(SM_CXVIRTUALSCREEN));
-    const LONG normY = NormalizeToVirtualDesktop(screenY, GetSystemMetrics(SM_YVIRTUALSCREEN), GetSystemMetrics(SM_CYVIRTUALSCREEN));
+    const LONG normX = NormalizeAbsoluteCoordinate(screenX, GetSystemMetrics(SM_XVIRTUALSCREEN), GetSystemMetrics(SM_CXVIRTUALSCREEN));
+    const LONG normY = NormalizeAbsoluteCoordinate(screenY, GetSystemMetrics(SM_YVIRTUALSCREEN), GetSystemMetrics(SM_CYVIRTUALSCREEN));
     return SendMouseInput(MOUSEEVENTF_MOVE | MOUSEEVENTF_ABSOLUTE | MOUSEEVENTF_VIRTUALDESK, normX, normY);
 }
 
@@ -242,6 +236,11 @@ bool InputInjector::HandleDirectTouch(uint32_t sourceId, web::DirectTouchPhase p
 {
     auto frame = directTouches_.Apply(sourceId, phase, normalizedPosition);
     return frame && InjectTouchFrame(*frame);
+}
+
+bool InputInjector::RefreshDirectTouches()
+{
+    return InjectTouchFrame(directTouches_.Updates());
 }
 
 void InputInjector::InjectPen(UINT32 flags, POINT pt, double pressure, double azimuth, double altitude)

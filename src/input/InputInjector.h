@@ -37,6 +37,7 @@ public:
     void HandleScroll(const ScrollMsg& scroll);
     bool HandleDirectTouch(uint32_t sourceId, web::DirectTouchPhase phase,
                            std::optional<web::Point> normalizedPosition);
+    bool RefreshDirectTouches();
     void HandlePencil(const PencilMsg& pencil);
     void HandleProximity(const ProximityMsg& proximity);
     void EndFingerSession();

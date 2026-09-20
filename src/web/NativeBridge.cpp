@@ -210,6 +210,14 @@ API void od_cancel_finger(void* handle) noexcept
     if (!bridge.dryRun) bridge.injector.EndFingerSession();
 }
 
+API int od_touch_refresh(void* handle) noexcept
+{
+    if (!handle) return 0;
+    auto& bridge = *static_cast<Bridge*>(handle);
+    if (bridge.dryRun) return 1;
+    return bridge.injector.RefreshDirectTouches() ? 1 : 0;
+}
+
 // Video handles are owned by one authenticated control session. Creation only
 // accepts a catalog identity; a caller cannot pass an arbitrary GDI source name.
 API void* od_video_create(const wchar_t* id, unsigned fps, unsigned bitrate) noexcept

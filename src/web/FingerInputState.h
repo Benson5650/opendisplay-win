@@ -60,6 +60,16 @@ public:
         return frame;
     }
 
+    std::vector<DirectTouchContact> Updates() const
+    {
+        std::vector<DirectTouchContact> frame;
+        frame.reserve(contacts_.size());
+        for (const auto& [sourceId, contact] : contacts_)
+            frame.push_back({sourceId, contact.pointerId, contact.position, DirectTouchChange::Update});
+        Sort(frame);
+        return frame;
+    }
+
     size_t Size() const { return contacts_.size(); }
 
 private:

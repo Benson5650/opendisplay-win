@@ -173,6 +173,7 @@ app.Map("/control", async (HttpContext c) => {
                     lock (gate) {
                         if (!Auth(c)) { Native.od_stop(native); CancelVideo(); shutdown.Cancel(); socket.Abort(); return; }
                         state = Native.od_tick(native);
+                        if (state == 1 && fingerMode == "touch") Native.od_touch_refresh(native);
                         if (video?.AttachmentTimedOut == true) {
                             Console.Error.WriteLine("Video attach timeout: browser did not connect within 10s");
                             Native.od_stop(native); CancelVideo();
