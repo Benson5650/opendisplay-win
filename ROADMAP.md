@@ -82,6 +82,13 @@ Depends on item 1 (a signed driver).
 Some from the [#65](https://github.com/peetzweg/opendisplay/issues/65)
 component-mapping, some ours:
 
+- **TODO: Apple Pencil Hover support (Web/iPad).** The control protocol and
+  Windows synthetic-pen path already understand hover, but the Web client still
+  needs end-to-end validation on a hover-capable iPad/Apple Pencil combination.
+  Detect hover-only pen movement without requiring contact, preserve azimuth and
+  altitude, map enter/move/leave into Windows pen in-range/update/out-of-range
+  events, expose an optional hover cursor, and add tests for Pencil takeover,
+  display edges, rotation, backgrounding and disconnect cleanup.
 - **mDNS/Bonjour discovery** — half done. `src/net/Mdns.cpp` browses
   `_opensidecar._tcp` (a hand-rolled query, no Bonjour SDK) and the tray already
   uses it to name the iPads. What's left is the UX: offer the found receivers as
