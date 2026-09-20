@@ -1,6 +1,7 @@
 #include "DisplayCatalog.h"
 #include <atomic>
 #include <chrono>
+#include <iostream>
 #include <stdexcept>
 #include <thread>
 #include <vector>
