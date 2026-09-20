@@ -43,6 +43,31 @@ $('forget').onclick=async()=>{
     $('settings').hidden=true;$('pairing').hidden=false;
   } catch(e){status(e.message);}
 };
+// ── Pen event diagnostics & toolbar controls ──
+const _dbg=document.createElement('div');
+_dbg.id='debugOverlay';
+Object.assign(_dbg.style,{position:'fixed',bottom:'0',left:'0',right:'0',maxHeight:'40vh',overflow:'auto',background:'rgba(0,0,0,.85)',color:'#0f0',font:'11px/1.4 monospace',padding:'6px 8px',zIndex:'9999',pointerEvents:'none',whiteSpace:'pre',display:'none'});
+document.body.appendChild(_dbg);const _dbgLines=[];
+function updateDebugOverlay(show){
+  _dbg.style.display=show?'block':'none';
+  if($('toggleLogBtn'))$('toggleLogBtn').hidden=!show;
+  if(show){_dbg.textContent=_dbgLines.join('\n');_dbg.scrollTop=_dbg.scrollHeight;}
+}
+function penLog(tag,e){
+  const line=`${tag.padEnd(10)} id=${e.pointerId} btn=${e.buttons} p=${(e.pressure??-1).toFixed(3)} ptr=${pointer} gen=${generation} type=${e.pointerType}`;
+  _dbgLines.push(line);if(_dbgLines.length>30)_dbgLines.shift();
+  if(_dbg.style.display!=='none'){_dbg.textContent=_dbgLines.join('\n');_dbg.scrollTop=_dbg.scrollHeight;}
+}
+function sysLog(msg){
+  _dbgLines.push(`>>> ${msg}`);if(_dbgLines.length>30)_dbgLines.shift();
+  if(_dbg.style.display!=='none'){_dbg.textContent=_dbgLines.join('\n');_dbg.scrollTop=_dbg.scrollHeight;}
+}
+$('showDebugLog').onchange=()=>updateDebugOverlay($('showDebugLog').checked);
+if($('toggleLogBtn'))$('toggleLogBtn').onclick=()=>{
+  const next=_dbg.style.display==='none'?'block':'none';
+  _dbg.style.display=next;
+  if(next==='block'){_dbg.textContent=_dbgLines.join('\n');_dbg.scrollTop=_dbg.scrollHeight;}
+};
 try {
   const saved=sanitizePreferences(JSON.parse(localStorage.getItem('od-preferences')||'{}'));
   for(const [key,value] of Object.entries(saved)){
@@ -93,6 +118,7 @@ $('pair').onclick = async () => {
     }, 1500);
   } catch(e) { $('pair').disabled = false; status(e.message); }
 };
+if ($('code')) $('code').onkeydown = e => { if (e.key === 'Enter') $('pair').click(); };
 function send(m) {
   if (socket?.readyState !== WebSocket.OPEN) return false;
   if (socket.bufferedAmount > 32768) { stop('網路積壓，已停止輸入。'); return false; }
@@ -275,31 +301,7 @@ surface.addEventListener('pointerdown',e=>{
 surface.addEventListener('pointermove',e=>{if(e.pointerType==='touch'&&fingerController){const {x,y}=fingerPoint(e);fingerController.move(e.pointerId,x,y,e.timeStamp);}});
 surface.addEventListener('pointerup',e=>{if(e.pointerType==='touch'&&fingerController){const {x,y}=fingerPoint(e);fingerController.up(e.pointerId,x,y,e.timeStamp);}});
 for(const name of ['pointercancel','lostpointercapture'])surface.addEventListener(name,e=>{if(e.pointerType==='touch'&&fingerController){const {x,y}=fingerPoint(e);fingerController.up(e.pointerId,x,y,e.timeStamp,true);}});
-// ── Pen event diagnostics & toolbar controls ──
-const _dbg=document.createElement('div');
-_dbg.id='debugOverlay';
-Object.assign(_dbg.style,{position:'fixed',bottom:'0',left:'0',right:'0',maxHeight:'40vh',overflow:'auto',background:'rgba(0,0,0,.85)',color:'#0f0',font:'11px/1.4 monospace',padding:'6px 8px',zIndex:'9999',pointerEvents:'none',whiteSpace:'pre',display:'none'});
-document.body.appendChild(_dbg);const _dbgLines=[];
-function updateDebugOverlay(show){
-  _dbg.style.display=show?'block':'none';
-  if($('toggleLogBtn'))$('toggleLogBtn').hidden=!show;
-  if(show){_dbg.textContent=_dbgLines.join('\n');_dbg.scrollTop=_dbg.scrollHeight;}
-}
-function penLog(tag,e){
-  const line=`${tag.padEnd(10)} id=${e.pointerId} btn=${e.buttons} p=${(e.pressure??-1).toFixed(3)} ptr=${pointer} gen=${generation} type=${e.pointerType}`;
-  _dbgLines.push(line);if(_dbgLines.length>30)_dbgLines.shift();
-  if(_dbg.style.display!=='none'){_dbg.textContent=_dbgLines.join('\n');_dbg.scrollTop=_dbg.scrollHeight;}
-}
-function sysLog(msg){
-  _dbgLines.push(`>>> ${msg}`);if(_dbgLines.length>30)_dbgLines.shift();
-  if(_dbg.style.display!=='none'){_dbg.textContent=_dbgLines.join('\n');_dbg.scrollTop=_dbg.scrollHeight;}
-}
-$('showDebugLog').onchange=()=>updateDebugOverlay($('showDebugLog').checked);
-$('toggleLogBtn').onclick=()=>{
-  const next=_dbg.style.display==='none'?'block':'none';
-  _dbg.style.display=next;
-  if(next==='block'){_dbg.textContent=_dbgLines.join('\n');_dbg.scrollTop=_dbg.scrollHeight;}
-};
+// ── End diagnostics & toolbar controls ──
 $('fullscreenBtn').onclick=async()=>{
   try{
     if(document.fullscreenElement||document.webkitFullscreenElement){
