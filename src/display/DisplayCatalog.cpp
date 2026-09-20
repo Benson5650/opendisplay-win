@@ -1,7 +1,9 @@
 #include "DisplayCatalog.h"
+#include <atomic>
 #include <chrono>
 #include <stdexcept>
 #include <thread>
+#include <vector>
 
 namespace od {
 std::vector<DisplayInfo> EnumerateDisplays()
@@ -48,9 +50,80 @@ std::vector<DisplayInfo> EnumerateDisplays()
     return displays;
 }
 
+struct OverlayInfo {
+    int number{};
+    std::wstring name;
+};
+
+static LRESULT CALLBACK IdentifyWndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
+    switch (msg) {
+    case WM_PAINT: {
+        PAINTSTRUCT ps;
+        HDC hdc = BeginPaint(hwnd, &ps);
+        auto* info = reinterpret_cast<OverlayInfo*>(GetWindowLongPtrW(hwnd, GWLP_USERDATA));
+        RECT rc;
+        GetClientRect(hwnd, &rc);
+        int winW = rc.right - rc.left;
+        int winH = rc.bottom - rc.top;
+
+        HBRUSH bg = CreateSolidBrush(RGB(16, 23, 34));
+        FillRect(hdc, &rc, bg);
+        DeleteObject(bg);
+
+        HPEN borderPen = CreatePen(PS_SOLID, 4, RGB(136, 202, 185));
+        HGDIOBJ oldPen = SelectObject(hdc, borderPen);
+        HGDIOBJ oldBrush = SelectObject(hdc, GetStockObject(HOLLOW_BRUSH));
+        RoundRect(hdc, 2, 2, winW - 2, winH - 2, 24, 24);
+        SelectObject(hdc, oldBrush);
+        SelectObject(hdc, oldPen);
+        DeleteObject(borderPen);
+
+        SetBkMode(hdc, TRANSPARENT);
+
+        HFONT bigFont = CreateFontW(100, 0, 0, 0, FW_BOLD, FALSE, FALSE, FALSE,
+            DEFAULT_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS,
+            CLEARTYPE_QUALITY, DEFAULT_PITCH | FF_SWISS, L"Segoe UI");
+        HGDIOBJ oldFont = SelectObject(hdc, bigFont);
+        SetTextColor(hdc, RGB(136, 202, 185));
+        std::wstring numStr = info ? std::to_wstring(info->number) : L"1";
+        RECT numRc{0, 15, winW, 125};
+        DrawTextW(hdc, numStr.c_str(), -1, &numRc, DT_CENTER | DT_SINGLELINE | DT_VCENTER);
+
+        HFONT nameFont = CreateFontW(22, 0, 0, 0, FW_SEMIBOLD, FALSE, FALSE, FALSE,
+            DEFAULT_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS,
+            CLEARTYPE_QUALITY, DEFAULT_PITCH | FF_SWISS, L"Segoe UI");
+        SelectObject(hdc, nameFont);
+        SetTextColor(hdc, RGB(232, 237, 244));
+        RECT nameRc{12, 135, winW - 12, 210};
+        std::wstring title = info ? info->name : L"";
+        DrawTextW(hdc, title.c_str(), -1, &nameRc, DT_CENTER | DT_WORDBREAK);
+
+        SelectObject(hdc, oldFont);
+        DeleteObject(bigFont);
+        DeleteObject(nameFont);
+
+        EndPaint(hwnd, &ps);
+        return 0;
+    }
+    case WM_ERASEBKGND:
+        return 1;
+    default:
+        return DefWindowProcW(hwnd, msg, wParam, lParam);
+    }
+}
+
+static std::atomic<bool> g_identifying{false};
+
 void IdentifyDisplays()
 {
+    bool expected = false;
+    if (!g_identifying.compare_exchange_strong(expected, true)) return;
+
     std::thread([] {
+        struct ScopeExit {
+            ~ScopeExit() { g_identifying = false; }
+        } exitGuard;
+
         std::vector<DisplayInfo> displays;
         try {
             displays = EnumerateDisplays();
@@ -62,13 +135,15 @@ void IdentifyDisplays()
 
         WNDCLASSEXW wc{};
         wc.cbSize = sizeof(wc);
-        wc.lpfnWndProc = DefWindowProcW;
+        wc.lpfnWndProc = IdentifyWndProc;
         wc.hInstance = hInstance;
         wc.lpszClassName = className;
         wc.hbrBackground = (HBRUSH)GetStockObject(BLACK_BRUSH);
         RegisterClassExW(&wc);
 
+        std::vector<OverlayInfo> infoList(displays.size());
         std::vector<HWND> hwnds;
+
         for (size_t i = 0; i < displays.size(); ++i) {
             const auto& d = displays[i];
             int monW = d.bounds.right - d.bounds.left;
@@ -77,6 +152,10 @@ void IdentifyDisplays()
             int winX = d.bounds.left + (monW - winW) / 2;
             int winY = d.bounds.top + (monH - winH) / 2;
 
+            infoList[i].number = static_cast<int>(i + 1);
+            infoList[i].name = d.name;
+            if (d.primary) infoList[i].name += L" (主要)";
+
             HWND hwnd = CreateWindowExW(
                 WS_EX_TOPMOST | WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE | WS_EX_LAYERED,
                 className, L"OpenDisplay Identify",
@@ -84,56 +163,25 @@ void IdentifyDisplays()
                 nullptr, nullptr, hInstance, nullptr);
 
             if (hwnd) {
-                SetLayeredWindowAttributes(hwnd, 0, 235, LWA_ALPHA);
+                SetWindowLongPtrW(hwnd, GWLP_USERDATA, reinterpret_cast<LONG_PTR>(&infoList[i]));
+                SetLayeredWindowAttributes(hwnd, 0, 240, LWA_ALPHA);
                 ShowWindow(hwnd, SW_SHOWNOACTIVATE);
+                InvalidateRect(hwnd, nullptr, TRUE);
                 UpdateWindow(hwnd);
-
-                HDC hdc = GetDC(hwnd);
-                if (hdc) {
-                    RECT rc{0, 0, winW, winH};
-                    HBRUSH bg = CreateSolidBrush(RGB(16, 23, 34));
-                    FillRect(hdc, &rc, bg);
-                    DeleteObject(bg);
-
-                    HPEN borderPen = CreatePen(PS_SOLID, 3, RGB(136, 202, 185));
-                    HGDIOBJ oldPen = SelectObject(hdc, borderPen);
-                    HGDIOBJ oldBrush = SelectObject(hdc, GetStockObject(HOLLOW_BRUSH));
-                    RoundRect(hdc, 2, 2, winW - 2, winH - 2, 20, 20);
-                    SelectObject(hdc, oldBrush);
-                    SelectObject(hdc, oldPen);
-                    DeleteObject(borderPen);
-
-                    SetBkMode(hdc, TRANSPARENT);
-
-                    HFONT bigFont = CreateFontW(100, 0, 0, 0, FW_BOLD, FALSE, FALSE, FALSE,
-                        DEFAULT_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS,
-                        CLEARTYPE_QUALITY, DEFAULT_PITCH | FF_SWISS, L"Segoe UI");
-                    HGDIOBJ oldFont = SelectObject(hdc, bigFont);
-                    SetTextColor(hdc, RGB(136, 202, 185));
-                    std::wstring numStr = std::to_wstring(i + 1);
-                    RECT numRc{0, 15, winW, 125};
-                    DrawTextW(hdc, numStr.c_str(), -1, &numRc, DT_CENTER | DT_SINGLELINE | DT_VCENTER);
-
-                    HFONT nameFont = CreateFontW(20, 0, 0, 0, FW_NORMAL, FALSE, FALSE, FALSE,
-                        DEFAULT_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS,
-                        CLEARTYPE_QUALITY, DEFAULT_PITCH | FF_SWISS, L"Segoe UI");
-                    SelectObject(hdc, nameFont);
-                    SetTextColor(hdc, RGB(232, 237, 244));
-                    RECT nameRc{10, 135, winW - 10, 205};
-                    std::wstring title = d.name;
-                    if (d.primary) title += L" (主要)";
-                    DrawTextW(hdc, title.c_str(), -1, &nameRc, DT_CENTER | DT_WORDBREAK);
-
-                    SelectObject(hdc, oldFont);
-                    DeleteObject(bigFont);
-                    DeleteObject(nameFont);
-                    ReleaseDC(hwnd, hdc);
-                }
                 hwnds.push_back(hwnd);
             }
         }
 
-        std::this_thread::sleep_for(std::chrono::milliseconds(2500));
+        auto start = std::chrono::steady_clock::now();
+        while (std::chrono::steady_clock::now() - start < std::chrono::milliseconds(2500)) {
+            MSG msg;
+            while (PeekMessageW(&msg, nullptr, 0, 0, PM_REMOVE)) {
+                TranslateMessage(&msg);
+                DispatchMessageW(&msg);
+            }
+            std::this_thread::sleep_for(std::chrono::milliseconds(15));
+        }
+
         for (HWND h : hwnds) {
             DestroyWindow(h);
         }
