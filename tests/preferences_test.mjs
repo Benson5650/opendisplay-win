@@ -5,6 +5,6 @@ assert.deepEqual(sanitizePreferences({mode:'mirror',quality:'high',fps:'60',targ
 assert.deepEqual(sanitizePreferences({mode:'invalid',fps:'120',panelWidth:4097,panelHeight:0}),{});
 assert.deepEqual(sanitizePreferences({panelWidth:2360,panelHeight:'1640',pressureCurve:'soft'}),{pressureCurve:'soft',panelWidth:'2360',panelHeight:'1640'});
 assert.deepEqual(sanitizePreferences({panelWidth:641,panelHeight:Infinity}),{});
-assert.deepEqual(sanitizePreferences({penBackground:'white',showActiveArea:false,showHover:true,showDebugLog:true}),{penBackground:'white',showActiveArea:false,showHover:true,showDebugLog:true});
-assert.deepEqual(sanitizePreferences({penBackground:'blue',showActiveArea:'yes',showHover:1,showDebugLog:'off'}),{});
-console.log('8 preference validation checks passed');
+assert.deepEqual(sanitizePreferences({penBackground:'white',showActiveArea:false,showHover:true,showDebugLog:true,hideCursor:true,activeAreaScale:'0.8',resolutionScale:'0.5'}),{penBackground:'white',showActiveArea:false,showHover:true,showDebugLog:true,hideCursor:true,activeAreaScale:'0.8',resolutionScale:'0.5'});
+assert.deepEqual(sanitizePreferences({penBackground:'blue',showActiveArea:'yes',showHover:1,showDebugLog:'off',hideCursor:'no',activeAreaScale:'0.2',resolutionScale:'2'}),{});
+console.log('9 preference validation checks passed');

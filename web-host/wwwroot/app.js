@@ -18,12 +18,21 @@ function updateMode() {
   $('panelFields').hidden=mode!=='extend';
   $('fpsField').hidden=mode==='pen';
   $('qualityField').hidden=mode==='pen';
+  $('scaleField').hidden=mode!=='mirror';
   $('penFields').hidden=mode!=='pen';
   $('mapping').disabled=mode!=='pen';
   if(mode!=='pen')$('mapping').value='preserve';
   restoreTarget();
 }
 $('mode').onchange=updateMode;
+if($('identify'))$('identify').onclick=async()=>{
+  try {
+    await post('/identify',{});
+    status('已在 Windows 螢幕顯示識別號碼。');
+  } catch(e) {
+    status(e.message);
+  }
+};
 function updateFingerMode(){ $('sensitivityField').hidden=$('fingerMode').value!=='trackpad'; }
 $('fingerMode').onchange=updateFingerMode;
 $('forget').onclick=async()=>{
@@ -128,16 +137,22 @@ function requestSession(reason){
   let panel={width:activeSession.panelWidth,height:activeSession.panelHeight};
   if(activeSession.mode==='extend')panel=orientDimensions(panel.width,panel.height,bounds);
   const display=activeSession.mode==='extend'?{...activeSession.display,...panel}:activeSession.display;
-  let width=bounds.width,height=bounds.height;
+  const isPen = activeSession.mode === 'pen';
+  const areaScale = isPen ? (Number(activeSession.activeAreaScale) || 1.0) : 1.0;
+  let maxW = bounds.width * areaScale;
+  let maxH = bounds.height * areaScale;
+  let width = maxW, height = maxH;
   if(activeSession.mapping==='preserve'){
-    const scale=Math.min(width/display.width,height/display.height);
+    const scale=Math.min(maxW/display.width,maxH/display.height);
     width=display.width*scale;height=display.height*scale;
   }
   teardownGeneration();
-  sessionSurface={width:bounds.width,height:bounds.height};
+  const offsetX = (bounds.width - width) / 2;
+  const offsetY = (bounds.height - height) / 2;
+  sessionSurface={width:bounds.width,height:bounds.height,offsetX,offsetY,activeWidth:width,activeHeight:height};
   $('surface').dataset.background=activeSession.mode==='pen'?activeSession.penBackground:'dark';
   $('activeArea').hidden=!activeSession.showActiveArea;
-  Object.assign($('activeArea').style,{width:`${width}px`,height:`${height}px`,left:`${(bounds.width-width)/2}px`,top:`${(bounds.height-height)/2}px`});
+  Object.assign($('activeArea').style,{width:`${width}px`,height:`${height}px`,left:`${offsetX}px`,top:`${offsetY}px`});
   const modeName=activeSession.mode==='extend'?'Extend':activeSession.mode==='mirror'?'Mirror':'Pen Tablet';
   const resolution=activeSession.mode==='extend'?` · ${panel.width} × ${panel.height}`:'';
   $('destination').textContent=`${modeName} → ${display.name}${resolution}${testMode?' · 測試模式（不注入）':''}`;
@@ -147,13 +162,15 @@ function requestSession(reason){
   if(!send({type:'start',mode:activeSession.mode,quality:activeSession.quality,pressureCurve:activeSession.pressureCurve,
     fingerMode:activeSession.fingerMode,trackpadSensitivity:activeSession.trackpadSensitivity,
     panelWidth:panel.width,panelHeight:panel.height,fps:activeSession.fps,target:display.id,
-    width:bounds.width,height:bounds.height,mapping:activeSession.mapping}))startInFlight=false;
+    width:isPen?width:bounds.width,height:isPen?height:bounds.height,mapping:isPen?'stretch':activeSession.mapping,
+    hideCursor:activeSession.hideCursor,resolutionScale:activeSession.resolutionScale}))startInFlight=false;
 }
 $('start').onclick = async () => {
   try {
     const saved={};
-    for(const key of ['mode','mapping','fps','quality','pressureCurve','trackpadSensitivity','panelWidth','panelHeight','penBackground'])saved[key]=$(key).value;
+    for(const key of ['mode','mapping','fps','quality','pressureCurve','trackpadSensitivity','panelWidth','panelHeight','penBackground','activeAreaScale','resolutionScale'])saved[key]=$(key).value;
     saved.showActiveArea=$('showActiveArea').checked;saved.showHover=$('showHover').checked;saved.showDebugLog=$('showDebugLog').checked;
+    saved.hideCursor=$('hideCursor').checked;
     localStorage.setItem('od-preferences',JSON.stringify(sanitizePreferences(saved)));
   } catch {}
   stopping=false;
@@ -170,6 +187,8 @@ $('start').onclick = async () => {
   activeSession={mode,display,panelWidth,panelHeight,mapping:$('mapping').value,fps:Number($('fps').value),
     quality:$('quality').value,pressureCurve:$('pressureCurve').value,fingerMode:$('fingerMode').value,
     trackpadSensitivity:$('trackpadSensitivity').value,penBackground:$('penBackground').value,
+    activeAreaScale:Number($('activeAreaScale').value)||1,hideCursor:$('hideCursor').checked,
+    resolutionScale:Number($('resolutionScale').value)||1,
     showActiveArea:$('showActiveArea').checked,showHover:$('showHover').checked,showDebugLog:$('showDebugLog').checked};
   updateDebugOverlay(activeSession.showDebugLog);
   $('start').disabled = true; $('tablet').hidden = false;
@@ -224,13 +243,19 @@ function sample(e, phase) {
   if(phase===0||phase===1){
     pressure=(typeof e.pressure==='number'&&e.pressure>0)?Math.min(1,e.pressure):0.5;
   }
-  send({type:'pen',generation,sequence:++sequence,phase,x:e.clientX-r.left,y:e.clientY-r.top,
+  const isPen = activeSession?.mode === 'pen';
+  const ox = isPen ? (sessionSurface?.offsetX || 0) : 0;
+  const oy = isPen ? (sessionSurface?.offsetY || 0) : 0;
+  send({type:'pen',generation,sequence:++sequence,phase,x:(e.clientX-r.left)-ox,y:(e.clientY-r.top)-oy,
     pressure,azimuth:az,altitude:alt});
 }
 const surface=$('surface');
 function fingerPoint(e){
   const r=surface.getBoundingClientRect();
-  return {x:e.clientX-r.left,y:e.clientY-r.top};
+  const isPen = activeSession?.mode === 'pen';
+  const ox = isPen ? (sessionSurface?.offsetX || 0) : 0;
+  const oy = isPen ? (sessionSurface?.offsetY || 0) : 0;
+  return {x:(e.clientX-r.left)-ox,y:(e.clientY-r.top)-oy};
 }
 function updateHoverIndicator(e,visible){
   const indicator=$('hoverIndicator');

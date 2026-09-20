@@ -13,4 +13,5 @@ struct DisplayInfo {
 };
 // Throws on enumeration failure; never substitutes the primary monitor.
 std::vector<DisplayInfo> EnumerateDisplays();
+void IdentifyDisplays();
 }

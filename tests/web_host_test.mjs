@@ -28,6 +28,7 @@ try {
   check(shell.includes('Pen Tablet'),'page content');
   check(shell.includes('penBackground')&&shell.includes('showActiveArea'),'pen tablet appearance controls');
   check(shell.includes('showHover')&&shell.includes('hoverIndicator'),'Apple Pencil hover controls');
+  check(shell.includes('activeAreaScale')&&shell.includes('hideCursor')&&shell.includes('resolutionScale'),'priority feature controls');
   const style=await (await fetch(origin+'/style.css')).text();
   check(style.includes('100svh')&&!style.includes('100dvh'),'stable iPad viewport does not resize on Safari toolbar changes');
   check((await fetch(origin+'/displays')).status===401,'display enumeration requires auth');
@@ -41,6 +42,7 @@ try {
   check(cookie.includes('httponly')&&cookie.includes('secure')&&cookie.includes('samesite=strict'),'cookie flags');
   const authCookie=cookie.split(';')[0];
   check((await post('/pair/status',{ticket})).status===401,'ticket single use');
+  r=await post('/identify',{},{Cookie:authCookie}); check(r.status===200,'identify displays endpoint');
   r=await fetch(origin+'/displays',{headers:{Cookie:authCookie}});
   const displays=await r.json();check(displays.length>0&&displays[0].id,'native display bridge');
   // Node's WebSocket has no header option; use a tiny standards-based TLS client

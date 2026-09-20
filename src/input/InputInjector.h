@@ -41,6 +41,7 @@ public:
     void HandlePencil(const PencilMsg& pencil);
     void HandleProximity(const ProximityMsg& proximity);
     void EndFingerSession();
+    void SetCursorFeedback(bool showCursor);
 
     // Call when a connection ends. The pen device outlives a reconnect, so a
     // link that drops mid-stroke would otherwise leave the injected pen in
@@ -73,6 +74,7 @@ private:
     bool injectFailed_ = false;    // log the first injection failure only
     bool penDown_ = false;
     bool penInRange_ = false;
+    bool showCursor_ = true;
     POINT lastPenPoint_{}; // where to release from if the link dies mid-stroke
 };
 

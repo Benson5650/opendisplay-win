@@ -1,5 +1,7 @@
 #include "DisplayCatalog.h"
+#include <chrono>
 #include <stdexcept>
+#include <thread>
 
 namespace od {
 std::vector<DisplayInfo> EnumerateDisplays()
@@ -44,5 +46,98 @@ std::vector<DisplayInfo> EnumerateDisplays()
         displays.push_back(std::move(info));
     }
     return displays;
+}
+
+void IdentifyDisplays()
+{
+    std::thread([] {
+        std::vector<DisplayInfo> displays;
+        try {
+            displays = EnumerateDisplays();
+        } catch (...) { return; }
+        if (displays.empty()) return;
+
+        HINSTANCE hInstance = GetModuleHandleW(nullptr);
+        const wchar_t* className = L"OpenDisplayIdentifyOverlay";
+
+        WNDCLASSEXW wc{};
+        wc.cbSize = sizeof(wc);
+        wc.lpfnWndProc = DefWindowProcW;
+        wc.hInstance = hInstance;
+        wc.lpszClassName = className;
+        wc.hbrBackground = (HBRUSH)GetStockObject(BLACK_BRUSH);
+        RegisterClassExW(&wc);
+
+        std::vector<HWND> hwnds;
+        for (size_t i = 0; i < displays.size(); ++i) {
+            const auto& d = displays[i];
+            int monW = d.bounds.right - d.bounds.left;
+            int monH = d.bounds.bottom - d.bounds.top;
+            int winW = 320, winH = 220;
+            int winX = d.bounds.left + (monW - winW) / 2;
+            int winY = d.bounds.top + (monH - winH) / 2;
+
+            HWND hwnd = CreateWindowExW(
+                WS_EX_TOPMOST | WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE | WS_EX_LAYERED,
+                className, L"OpenDisplay Identify",
+                WS_POPUP, winX, winY, winW, winH,
+                nullptr, nullptr, hInstance, nullptr);
+
+            if (hwnd) {
+                SetLayeredWindowAttributes(hwnd, 0, 235, LWA_ALPHA);
+                ShowWindow(hwnd, SW_SHOWNOACTIVATE);
+                UpdateWindow(hwnd);
+
+                HDC hdc = GetDC(hwnd);
+                if (hdc) {
+                    RECT rc{0, 0, winW, winH};
+                    HBRUSH bg = CreateSolidBrush(RGB(16, 23, 34));
+                    FillRect(hdc, &rc, bg);
+                    DeleteObject(bg);
+
+                    HPEN borderPen = CreatePen(PS_SOLID, 3, RGB(136, 202, 185));
+                    HGDIOBJ oldPen = SelectObject(hdc, borderPen);
+                    HGDIOBJ oldBrush = SelectObject(hdc, GetStockObject(HOLLOW_BRUSH));
+                    RoundRect(hdc, 2, 2, winW - 2, winH - 2, 20, 20);
+                    SelectObject(hdc, oldBrush);
+                    SelectObject(hdc, oldPen);
+                    DeleteObject(borderPen);
+
+                    SetBkMode(hdc, TRANSPARENT);
+
+                    HFONT bigFont = CreateFontW(100, 0, 0, 0, FW_BOLD, FALSE, FALSE, FALSE,
+                        DEFAULT_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS,
+                        CLEARTYPE_QUALITY, DEFAULT_PITCH | FF_SWISS, L"Segoe UI");
+                    HGDIOBJ oldFont = SelectObject(hdc, bigFont);
+                    SetTextColor(hdc, RGB(136, 202, 185));
+                    std::wstring numStr = std::to_wstring(i + 1);
+                    RECT numRc{0, 15, winW, 125};
+                    DrawTextW(hdc, numStr.c_str(), -1, &numRc, DT_CENTER | DT_SINGLELINE | DT_VCENTER);
+
+                    HFONT nameFont = CreateFontW(20, 0, 0, 0, FW_NORMAL, FALSE, FALSE, FALSE,
+                        DEFAULT_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS,
+                        CLEARTYPE_QUALITY, DEFAULT_PITCH | FF_SWISS, L"Segoe UI");
+                    SelectObject(hdc, nameFont);
+                    SetTextColor(hdc, RGB(232, 237, 244));
+                    RECT nameRc{10, 135, winW - 10, 205};
+                    std::wstring title = d.name;
+                    if (d.primary) title += L" (主要)";
+                    DrawTextW(hdc, title.c_str(), -1, &nameRc, DT_CENTER | DT_WORDBREAK);
+
+                    SelectObject(hdc, oldFont);
+                    DeleteObject(bigFont);
+                    DeleteObject(nameFont);
+                    ReleaseDC(hwnd, hdc);
+                }
+                hwnds.push_back(hwnd);
+            }
+        }
+
+        std::this_thread::sleep_for(std::chrono::milliseconds(2500));
+        for (HWND h : hwnds) {
+            DestroyWindow(h);
+        }
+        UnregisterClassW(className, hInstance);
+    }).detach();
 }
 }

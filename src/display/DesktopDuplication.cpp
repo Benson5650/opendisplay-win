@@ -28,50 +28,77 @@ inline uint8_t Clamp8(int v)
 // BT.601 studio-range BGRA -> NV12. CPU-side; fine for a local-link sender,
 // not optimized (a GPU color-convert MFT would be the follow-up if this
 // turns out to be the bottleneck).
-void ConvertBgraToNv12(const uint8_t* bgra, UINT rowPitch, uint32_t width, uint32_t height, std::vector<uint8_t>& nv12)
+void ConvertBgraToNv12(const uint8_t* bgra, UINT rowPitch, uint32_t width, uint32_t height,
+                       uint32_t dstWidth, uint32_t dstHeight, std::vector<uint8_t>& nv12)
 {
-    nv12.resize(static_cast<size_t>(width) * height * 3 / 2);
+    if (dstWidth == 0 || dstHeight == 0) { dstWidth = width; dstHeight = height; }
+    dstWidth = (dstWidth / 2) * 2;
+    dstHeight = (dstHeight / 2) * 2;
+    nv12.resize(static_cast<size_t>(dstWidth) * dstHeight * 3 / 2);
     uint8_t* yPlane = nv12.data();
-    uint8_t* uvPlane = nv12.data() + static_cast<size_t>(width) * height;
+    uint8_t* uvPlane = nv12.data() + static_cast<size_t>(dstWidth) * dstHeight;
 
-    for (uint32_t row = 0; row < height; ++row) {
-        const uint8_t* srcRow = bgra + static_cast<size_t>(row) * rowPitch;
-        uint8_t* yRow = yPlane + static_cast<size_t>(row) * width;
-        for (uint32_t col = 0; col < width; ++col) {
-            const uint8_t* px = srcRow + static_cast<size_t>(col) * 4; // B G R A
+    if (dstWidth == width && dstHeight == height) {
+        for (uint32_t row = 0; row < height; ++row) {
+            const uint8_t* srcRow = bgra + static_cast<size_t>(row) * rowPitch;
+            uint8_t* yRow = yPlane + static_cast<size_t>(row) * width;
+            for (uint32_t col = 0; col < width; ++col) {
+                const uint8_t* px = srcRow + static_cast<size_t>(col) * 4;
+                int b = px[0], g = px[1], r = px[2];
+                int y = ((66 * r + 129 * g + 25 * b + 128) >> 8) + 16;
+                yRow[col] = Clamp8(y);
+            }
+        }
+        for (uint32_t row = 0; row < height; row += 2) {
+            const uint8_t* srcRow0 = bgra + static_cast<size_t>(row) * rowPitch;
+            const uint8_t* srcRow1 = bgra + static_cast<size_t>(std::min(row + 1, height - 1)) * rowPitch;
+            uint8_t* uvRow = uvPlane + static_cast<size_t>(row / 2) * width;
+            for (uint32_t col = 0; col < width; col += 2) {
+                uint32_t col1 = std::min(col + 1, width - 1);
+                auto sample = [](const uint8_t* rowPtr, uint32_t c, int& r, int& g, int& b) {
+                    const uint8_t* px = rowPtr + static_cast<size_t>(c) * 4;
+                    b = px[0]; g = px[1]; r = px[2];
+                };
+                int r, g, b, sr = 0, sg = 0, sb = 0;
+                sample(srcRow0, col, r, g, b); sr += r; sg += g; sb += b;
+                sample(srcRow0, col1, r, g, b); sr += r; sg += g; sb += b;
+                sample(srcRow1, col, r, g, b); sr += r; sg += g; sb += b;
+                sample(srcRow1, col1, r, g, b); sr += r; sg += g; sb += b;
+                r = sr / 4; g = sg / 4; b = sb / 4;
+                int u = ((-38 * r - 74 * g + 112 * b + 128) >> 8) + 128;
+                int v = ((112 * r - 94 * g - 18 * b + 128) >> 8) + 128;
+                uvRow[col] = Clamp8(u);
+                uvRow[col1] = Clamp8(v);
+            }
+        }
+        return;
+    }
+
+    for (uint32_t row = 0; row < dstHeight; ++row) {
+        uint32_t srcY = (row * height) / dstHeight;
+        const uint8_t* srcRow = bgra + static_cast<size_t>(srcY) * rowPitch;
+        uint8_t* yRow = yPlane + static_cast<size_t>(row) * dstWidth;
+        for (uint32_t col = 0; col < dstWidth; ++col) {
+            uint32_t srcX = (col * width) / dstWidth;
+            const uint8_t* px = srcRow + static_cast<size_t>(srcX) * 4;
             int b = px[0], g = px[1], r = px[2];
             int y = ((66 * r + 129 * g + 25 * b + 128) >> 8) + 16;
             yRow[col] = Clamp8(y);
         }
     }
 
-    for (uint32_t row = 0; row < height; row += 2) {
-        const uint8_t* srcRow0 = bgra + static_cast<size_t>(row) * rowPitch;
-        const uint8_t* srcRow1 = bgra + static_cast<size_t>(std::min(row + 1, height - 1)) * rowPitch;
-        uint8_t* uvRow = uvPlane + static_cast<size_t>(row / 2) * width;
-
-        for (uint32_t col = 0; col < width; col += 2) {
-            uint32_t col1 = std::min(col + 1, width - 1);
-
-            auto sample = [](const uint8_t* rowPtr, uint32_t c, int& r, int& g, int& b) {
-                const uint8_t* px = rowPtr + static_cast<size_t>(c) * 4;
-                b = px[0];
-                g = px[1];
-                r = px[2];
-            };
-
-            int r, g, b, sr = 0, sg = 0, sb = 0;
-            sample(srcRow0, col, r, g, b); sr += r; sg += g; sb += b;
-            sample(srcRow0, col1, r, g, b); sr += r; sg += g; sb += b;
-            sample(srcRow1, col, r, g, b); sr += r; sg += g; sb += b;
-            sample(srcRow1, col1, r, g, b); sr += r; sg += g; sb += b;
-            r = sr / 4; g = sg / 4; b = sb / 4;
-
+    for (uint32_t row = 0; row < dstHeight; row += 2) {
+        uint32_t srcY = (row * height) / dstHeight;
+        const uint8_t* srcRow = bgra + static_cast<size_t>(srcY) * rowPitch;
+        uint8_t* uvRow = uvPlane + static_cast<size_t>(row / 2) * dstWidth;
+        for (uint32_t col = 0; col < dstWidth; col += 2) {
+            uint32_t srcX = (col * width) / dstWidth;
+            const uint8_t* px = srcRow + static_cast<size_t>(srcX) * 4;
+            int b = px[0], g = px[1], r = px[2];
             int u = ((-38 * r - 74 * g + 112 * b + 128) >> 8) + 128;
             int v = ((112 * r - 94 * g - 18 * b + 128) >> 8) + 128;
-
             uvRow[col] = Clamp8(u);
-            uvRow[col1] = Clamp8(v);
+            uvRow[col + 1] = Clamp8(v);
         }
     }
 }
@@ -155,7 +182,7 @@ bool DesktopDuplication::Reopen()
     return Open(name);
 }
 
-bool DesktopDuplication::CaptureFrameNv12(std::vector<uint8_t>& nv12, int timeoutMs)
+bool DesktopDuplication::CaptureFrameNv12(std::vector<uint8_t>& nv12, int timeoutMs, uint32_t dstWidth, uint32_t dstHeight)
 {
     // The duplication may have been torn down by an earlier frame (topology
     // change, access loss). Try to rebuild before giving up — and if it still
@@ -246,7 +273,7 @@ bool DesktopDuplication::CaptureFrameNv12(std::vector<uint8_t>& nv12, int timeou
     if (SUCCEEDED(hr)) {
         if (pointerVisible_ && !pointerShape_.empty())
             CompositePointer(reinterpret_cast<uint8_t*>(mapped.pData), mapped.RowPitch, frameW, frameH);
-        ConvertBgraToNv12(reinterpret_cast<const uint8_t*>(mapped.pData), mapped.RowPitch, frameW, frameH, nv12);
+        ConvertBgraToNv12(reinterpret_cast<const uint8_t*>(mapped.pData), mapped.RowPitch, frameW, frameH, dstWidth, dstHeight, nv12);
         context_->Unmap(staging_.Get(), 0);
     }
 

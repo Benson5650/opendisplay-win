@@ -140,6 +140,11 @@ app.MapGet("/displays", (HttpContext c) => {
         return Native.od_displays(text, text.Capacity) == 1 ? Results.Text(text.ToString(), "application/json") : Results.StatusCode(503);
     }
 });
+app.MapPost("/identify", (HttpContext c) => {
+    if (!Auth(c)) return Results.Unauthorized();
+    Native.od_identify_displays();
+    return Results.Json(new { ok = true });
+});
 app.Map("/control", async (HttpContext c) => {
     if (!Auth(c)) { c.Response.StatusCode = 401; return; }
     if (!c.WebSockets.IsWebSocketRequest) { c.Response.StatusCode = 400; return; }
@@ -243,10 +248,13 @@ app.Map("/control", async (HttpContext c) => {
                                 }
                                 target = identity.ToString();
                             }
+                            var hideCursor = m.TryGetProperty("hideCursor", out var hideVal) && hideVal.GetBoolean();
+                            Native.od_set_cursor_feedback(native, hideCursor ? 0 : 1);
+                            var resolutionScale = m.TryGetProperty("resolutionScale", out var scaleVal) ? scaleVal.GetDouble() : 1.0;
                             try {
                             var generation = Native.od_start(native, target, width, height, mapping == "stretch" ? 1 : 0);
                             if (generation != 0 && mode != "pen") {
-                                video = new VideoSession(target, fps, generation, c.Request.Cookies["od-device"]!, ownedDisplay, bitrate);
+                                video = new VideoSession(target, fps, generation, c.Request.Cookies["od-device"]!, ownedDisplay, bitrate, resolutionScale);
                                 ownedDisplay = 0;
                                 ownedVideos.Add(video);
                             }

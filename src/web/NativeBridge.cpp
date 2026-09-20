@@ -218,16 +218,31 @@ API int od_touch_refresh(void* handle) noexcept
     return bridge.injector.RefreshDirectTouches() ? 1 : 0;
 }
 
+API void od_set_cursor_feedback(void* handle, int showCursor) noexcept
+{
+    if (handle) static_cast<Bridge*>(handle)->injector.SetCursorFeedback(showCursor != 0);
+}
+
+API int od_identify_displays() noexcept
+{
+    try {
+        od::IdentifyDisplays();
+        return 1;
+    } catch (...) {
+        return 0;
+    }
+}
+
 // Video handles are owned by one authenticated control session. Creation only
 // accepts a catalog identity; a caller cannot pass an arbitrary GDI source name.
-API void* od_video_create(const wchar_t* id, unsigned fps, unsigned bitrate) noexcept
+API void* od_video_create(const wchar_t* id, unsigned fps, unsigned bitrate, double scale = 1.0) noexcept
 {
     if (!id || !*id || (fps != 30 && fps != 60) || bitrate < 4'000'000 || bitrate > 24'000'000) return nullptr;
     try {
         for (const auto& display : od::EnumerateDisplays()) {
             if (display.id != id) continue;
             auto video = std::make_unique<od::web::VideoPipeline>();
-            video->Start(display.deviceName, fps, bitrate);
+            video->Start(display.deviceName, fps, bitrate, scale);
             return video.release();
         }
     } catch (...) {}

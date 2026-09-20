@@ -30,7 +30,7 @@ public:
     // (resized as needed). Returns false on timeout (no desktop update since
     // the last call — caller should just re-encode/resend the previous
     // frame) or on error.
-    bool CaptureFrameNv12(std::vector<uint8_t>& nv12, int timeoutMs = 500);
+    bool CaptureFrameNv12(std::vector<uint8_t>& nv12, int timeoutMs = 500, uint32_t dstWidth = 0, uint32_t dstHeight = 0);
 
     uint32_t Width() const { return width_; }
     uint32_t Height() const { return height_; }

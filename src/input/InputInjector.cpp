@@ -170,7 +170,8 @@ bool InputInjector::EnsurePenDevice()
     if (penDeviceFailed_)
         return false;
 
-    penDevice_ = CreateSyntheticPointerDevice(PT_PEN, 1, POINTER_FEEDBACK_DEFAULT);
+    POINTER_FEEDBACK_MODE feedback = showCursor_ ? POINTER_FEEDBACK_DEFAULT : POINTER_FEEDBACK_NONE;
+    penDevice_ = CreateSyntheticPointerDevice(PT_PEN, 1, feedback);
     if (penDevice_ == nullptr) {
         // Pre-1809 Windows, or the slot is taken. Give up for this session
         // rather than hammering the API once per pen sample; finger touch is
@@ -180,6 +181,19 @@ bool InputInjector::EnsurePenDevice()
         return false;
     }
     return true;
+}
+
+void InputInjector::SetCursorFeedback(bool showCursor)
+{
+    if (showCursor_ == showCursor) return;
+    showCursor_ = showCursor;
+    if (penDevice_ != nullptr) {
+        ReleasePenIfDown(lastPenPoint_);
+        DestroySyntheticPointerDevice(penDevice_);
+        penDevice_ = nullptr;
+        penDeviceFailed_ = false;
+        EnsurePenDevice();
+    }
 }
 
 bool InputInjector::EnsureTouchDevice()
