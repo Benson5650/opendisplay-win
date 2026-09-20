@@ -5,6 +5,7 @@ using System.Security.Cryptography.X509Certificates;
 using System.Text;
 using System.Text.Json;
 
+Native.EnsureDefaultDesktop();
 Native.SetProcessDpiAwarenessContext(new nint(-4));
 var builder = WebApplication.CreateBuilder(args);
 var ipText = builder.Configuration["ip"] ?? "127.0.0.1";

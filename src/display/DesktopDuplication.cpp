@@ -76,10 +76,20 @@ void ConvertBgraToNv12(const uint8_t* bgra, UINT rowPitch, uint32_t width, uint3
     }
 }
 
+static void EnsureDefaultDesktop()
+{
+    HDESK hDesk = OpenDesktopW(L"default", 0, FALSE, GENERIC_ALL);
+    if (hDesk) {
+        SetThreadDesktop(hDesk);
+        CloseDesktop(hDesk);
+    }
+}
+
 } // namespace
 
 bool DesktopDuplication::Open(const std::wstring& deviceName)
 {
+    EnsureDefaultDesktop();
     ComPtr<IDXGIFactory1> factory;
     if (FAILED(CreateDXGIFactory1(IID_PPV_ARGS(&factory))))
         return false;

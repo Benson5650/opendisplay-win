@@ -28,8 +28,18 @@ void DeriveTilt(double azimuth, double altitude, INT32& tiltX, INT32& tiltY)
     tiltY = static_cast<INT32>(std::lround(std::clamp(y, -90.0, 90.0)));
 }
 
+static void EnsureDefaultDesktop()
+{
+    HDESK hDesk = OpenDesktopW(L"default", 0, FALSE, GENERIC_ALL);
+    if (hDesk) {
+        SetThreadDesktop(hDesk);
+        CloseDesktop(hDesk);
+    }
+}
+
 bool SendMouseInput(DWORD flags, LONG dx = 0, LONG dy = 0, LONG mouseData = 0)
 {
+    EnsureDefaultDesktop();
     INPUT input{};
     input.type = INPUT_MOUSE;
     input.mi.dx = dx;
@@ -154,6 +164,7 @@ POINT InputInjector::ScreenPoint(double nx, double ny) const
 
 bool InputInjector::EnsurePenDevice()
 {
+    EnsureDefaultDesktop();
     if (penDevice_ != nullptr)
         return true;
     if (penDeviceFailed_)
@@ -173,6 +184,7 @@ bool InputInjector::EnsurePenDevice()
 
 bool InputInjector::EnsureTouchDevice()
 {
+    EnsureDefaultDesktop();
     if (touchDevice_ != nullptr) return true;
     if (touchDeviceFailed_) return false;
     touchDevice_ = CreateSyntheticPointerDevice(PT_TOUCH,
@@ -187,6 +199,7 @@ bool InputInjector::EnsureTouchDevice()
 
 bool InputInjector::InjectTouchFrame(const std::vector<web::DirectTouchContact>& frame)
 {
+    EnsureDefaultDesktop();
     if (frame.empty()) return true;
     if (!EnsureTouchDevice()) return false;
     std::vector<POINTER_TYPE_INFO> infos(frame.size());
@@ -245,6 +258,7 @@ bool InputInjector::RefreshDirectTouches()
 
 void InputInjector::InjectPen(UINT32 flags, POINT pt, double pressure, double azimuth, double altitude)
 {
+    EnsureDefaultDesktop();
     lastPenPoint_ = pt;
 
     POINTER_TYPE_INFO info{};

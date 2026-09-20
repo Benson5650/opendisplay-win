@@ -26,4 +26,17 @@ internal static class Native
     [DllImport(Lib, CallingConvention = CallingConvention.Cdecl)] public static extern int od_sample(nint h, ulong g, ulong seq, int phase, double x, double y, double p, double az, double alt);
     [DllImport(Lib, CallingConvention = CallingConvention.Cdecl)] public static extern ulong od_emitted(nint h);
     [DllImport("user32.dll")] public static extern bool SetProcessDpiAwarenessContext(nint context);
+    [DllImport("user32.dll", CharSet = CharSet.Unicode, SetLastError = true)] public static extern nint OpenDesktop(string lpszDesktop, uint dwFlags, bool fInherit, uint dwDesiredAccess);
+    [DllImport("user32.dll", SetLastError = true)] public static extern bool SetThreadDesktop(nint hDesktop);
+    [DllImport("user32.dll", SetLastError = true)] public static extern bool CloseDesktop(nint hDesktop);
+    public static void EnsureDefaultDesktop()
+    {
+        try {
+            var hDesk = OpenDesktop("default", 0, false, 0x1FF);
+            if (hDesk != 0) {
+                SetThreadDesktop(hDesk);
+                CloseDesktop(hDesk);
+            }
+        } catch {}
+    }
 }
