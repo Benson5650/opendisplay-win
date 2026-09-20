@@ -1,11 +1,11 @@
 'use strict';
 import {VideoReceiver} from './video.mjs';
-import {surfaceChanged} from './geometry.mjs';
+import {orientDimensions,surfaceChanged} from './geometry.mjs';
 import {sanitizePreferences} from './preferences.mjs';
 import {FingerController} from './finger.mjs';
-let sessionSurface;
+let sessionSurface,activeSession,pendingSession;
 let fingerController,lastPenAt=-Infinity;
-let videoSocket, videoReceiver, stopping=false;
+let videoSocket,videoReceiver,stopping=false,startInFlight=false,queuedRestartReason,resizeTimer,testMode=false;
 const $ = id => document.getElementById(id);
 const wsOrigin=location.origin.replace(/^http/, 'ws');
 let socket, generation = 0, sequence = 0, pointer = null, wakeLock, displays = [], heartbeat, ticketTimer;
@@ -73,7 +73,8 @@ function stop(message = '已停止。可重新選擇螢幕。') {
   if(stopping)return;
   stopping=true;
   fingerController?.cancelAll();fingerController=undefined;
-  sessionSurface=undefined;
+  sessionSurface=undefined;activeSession=undefined;pendingSession=undefined;
+  startInFlight=false;queuedRestartReason=undefined;clearTimeout(resizeTimer);
   status(message);
   console.info('OpenDisplay stopped:',message);
   const oldControl=socket;socket=undefined;
@@ -87,6 +88,41 @@ function stop(message = '已停止。可重新選擇螢幕。') {
   wakeLock?.release().catch(()=>{}); wakeLock = undefined;
   document.body.classList.remove('writing'); $('tablet').hidden = true; $('settings').hidden = false;
   $('start').disabled = false; status(message);
+}
+function teardownGeneration(){
+  fingerController?.cancelAll();fingerController=undefined;
+  const receiver=videoReceiver;videoReceiver=undefined;receiver?.close();
+  const oldVideo=videoSocket;videoSocket=undefined;oldVideo?.close();
+  document.getElementById('videoCanvas')?.remove();
+  document.querySelector('.hint').hidden=false;
+  generation=0;sequence=0;pointer=null;clearInterval(heartbeat);
+}
+function requestSession(reason){
+  if(!activeSession||socket?.readyState!==WebSocket.OPEN)return;
+  if(startInFlight){queuedRestartReason=reason||'畫布再次改變，正在重新調整。';return;}
+  const bounds=$('surface').getBoundingClientRect();
+  if(!Number.isFinite(bounds.width)||!Number.isFinite(bounds.height)||bounds.width<=0||bounds.height<=0)return;
+  let panel={width:activeSession.panelWidth,height:activeSession.panelHeight};
+  if(activeSession.mode==='extend')panel=orientDimensions(panel.width,panel.height,bounds);
+  const display=activeSession.mode==='extend'?{...activeSession.display,...panel}:activeSession.display;
+  let width=bounds.width,height=bounds.height;
+  if(activeSession.mapping==='preserve'){
+    const scale=Math.min(width/display.width,height/display.height);
+    width=display.width*scale;height=display.height*scale;
+  }
+  teardownGeneration();
+  sessionSurface={width:bounds.width,height:bounds.height};
+  Object.assign($('activeArea').style,{width:`${width}px`,height:`${height}px`,left:`${(bounds.width-width)/2}px`,top:`${(bounds.height-height)/2}px`});
+  const modeName=activeSession.mode==='extend'?'Extend':activeSession.mode==='mirror'?'Mirror':'Pen Tablet';
+  const resolution=activeSession.mode==='extend'?` · ${panel.width} × ${panel.height}`:'';
+  $('destination').textContent=`${modeName} → ${display.name}${resolution}${testMode?' · 測試模式（不注入）':''}`;
+  if(reason)status(reason);
+  pendingSession={...activeSession,panelWidth:panel.width,panelHeight:panel.height,width,height,bounds,reason};
+  startInFlight=true;
+  if(!send({type:'start',mode:activeSession.mode,quality:activeSession.quality,pressureCurve:activeSession.pressureCurve,
+    fingerMode:activeSession.fingerMode,trackpadSensitivity:activeSession.trackpadSensitivity,
+    panelWidth:panel.width,panelHeight:panel.height,fps:activeSession.fps,target:display.id,
+    width:bounds.width,height:bounds.height,mapping:activeSession.mapping}))startInFlight=false;
 }
 $('start').onclick = async () => {
   try {
@@ -104,33 +140,32 @@ $('start').onclick = async () => {
   }
   const display = mode==='extend'?{id:'',name:'新的延伸螢幕',width:panelWidth,height:panelHeight}:displays.find(d=>d.id === $('target').value);
   if (!display) { status('請先選擇目標螢幕。'); return; }
+  activeSession={mode,display,panelWidth,panelHeight,mapping:$('mapping').value,fps:Number($('fps').value),
+    quality:$('quality').value,pressureCurve:$('pressureCurve').value,fingerMode:$('fingerMode').value,
+    trackpadSensitivity:$('trackpadSensitivity').value};
   $('start').disabled = true; $('tablet').hidden = false;
   document.body.classList.add('writing');
-  $('destination').textContent = `${mode==='extend'?'Extend':mode==='mirror'?'Mirror':'Pen Tablet'} → ${display.name}`;
-  const surface = $('surface').getBoundingClientRect();
-  sessionSurface={width:surface.width,height:surface.height};
-  let width=surface.width, height=surface.height;
-  if ($('mapping').value === 'preserve') {
-    const scale=Math.min(width/display.width,height/display.height);
-    width=display.width*scale; height=display.height*scale;
-  }
-  Object.assign($('activeArea').style,{width:`${width}px`,height:`${height}px`,left:`${(surface.width-width)/2}px`,top:`${(surface.height-height)/2}px`});
   const ws = new WebSocket(`${wsOrigin}/control`); socket = ws;
-  ws.onopen = () => send({type:'start',mode,quality:$('quality').value,pressureCurve:$('pressureCurve').value,fingerMode:$('fingerMode').value,trackpadSensitivity:$('trackpadSensitivity').value,panelWidth,panelHeight,fps:Number($('fps').value),target:display.id,width:surface.width,height:surface.height,mapping:$('mapping').value});
+  ws.onopen=()=>requestSession();
   ws.onmessage = e => {
     if (socket !== ws) return;
     const m = JSON.parse(e.data);
-    if (m.type === 'hello' && m.dryRun) $('destination').textContent += ' · 測試模式（不注入）';
+    if(m.type==='hello'&&m.dryRun){testMode=true;if(!$('destination').textContent.includes('測試模式'))$('destination').textContent+=' · 測試模式（不注入）';}
     if (m.type === 'started') {
+      startInFlight=false;
       if (!m.generation) { stop(m.error==='EXTEND_UNAVAILABLE_REGISTER_RESOLUTION_LOCALLY'?'Extend 無法建立：請先在 Windows 註冊此解析度並確認 Parsec 驅動。':'目標螢幕或映射無效。'); return; }
+      if(queuedRestartReason){const reason=queuedRestartReason;queuedRestartReason=undefined;requestSession(reason);return;}
+      const started=pendingSession;
+      if(!started){stop('工作階段狀態無效。');return;}
       generation=m.generation; sequence=0;
-      fingerController=new FingerController($('fingerMode').value,message=>send({...message,generation,sequence:++sequence}));
+      fingerController=new FingerController(started.fingerMode,message=>send({...message,generation,sequence:++sequence}));
       heartbeat=setInterval(()=>send({type:'heartbeat',generation}),500);
+      status(started.reason?'旋轉完成，工作階段已自動重建。':'已連線。');
       if(m.videoTicket){
         const canvas=document.createElement('canvas');canvas.id='videoCanvas';
-        Object.assign(canvas.style,{position:'absolute',pointerEvents:'none',width:`${width}px`,height:`${height}px`,left:`${(surface.width-width)/2}px`,top:`${(surface.height-height)/2}px`});
+        Object.assign(canvas.style,{position:'absolute',pointerEvents:'none',width:`${started.width}px`,height:`${started.height}px`,left:`${(started.bounds.width-started.width)/2}px`,top:`${(started.bounds.height-started.height)/2}px`});
         $('surface').prepend(canvas);document.querySelector('.hint').hidden=true;
-        const receiver=new VideoReceiver(canvas,generation,()=>send({type:'keyframe',generation}),message=>stop(message));
+        const receiver=new VideoReceiver(canvas,generation,()=>send({type:'keyframe',generation}),message=>{if(videoReceiver===receiver)stop(message);});
         videoReceiver=receiver;
         const vs=new WebSocket(`${wsOrigin}/video?ticket=${encodeURIComponent(m.videoTicket)}`);
         videoSocket=vs;vs.binaryType='arraybuffer';
@@ -191,8 +226,12 @@ surface.addEventListener('contextmenu',e=>e.preventDefault());
 $('stop').onclick=()=>stop(); $('refresh').onclick=()=>refresh().catch(e=>status(e.message));
 document.addEventListener('visibilitychange',()=>{if(document.hidden&&socket)stop('切到背景，已停止輸入。');});
 window.addEventListener('resize',()=>{
-  if(socket && surfaceChanged(sessionSurface,$('surface').getBoundingClientRect()))
-    stop('畫布大小已改變，請重新開始。');
+  if(!socket||stopping)return;
+  clearTimeout(resizeTimer);
+  resizeTimer=setTimeout(()=>{
+    if(socket&&!stopping&&surfaceChanged(sessionSurface,$('surface').getBoundingClientRect()))
+      requestSession('偵測到 iPad 旋轉，正在重建工作階段。');
+  },350);
 });
 window.addEventListener('pagehide',()=>stop());
 if('serviceWorker' in navigator) navigator.serviceWorker.register('/sw.js').catch(()=>{});

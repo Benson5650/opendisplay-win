@@ -6,7 +6,7 @@
 <section id="settings" hidden>
 <label>模式 <select id="mode"><option value="pen">Pen Tablet · 純手寫</option><option value="mirror">Mirror · 鏡像既有螢幕</option><option value="extend">Extend · 新增延伸螢幕</option></select></label>
 <label id="targetField">控制的 Windows 螢幕 <select id="target"><option value="">請選擇螢幕</option></select></label>
-<div id="panelFields" hidden><label>延伸螢幕寬度（像素）<input id="panelWidth" type="number" min="640" max="4096" step="2" value="2360"></label><label>延伸螢幕高度（像素）<input id="panelHeight" type="number" min="480" max="4096" step="2" value="1640"></label><p>此解析度必須先在 Windows 註冊。不是瀏覽器視窗大小；橫直向請自行交換寬高。</p></div>
+<div id="panelFields" hidden><label>延伸螢幕寬度（像素）<input id="panelWidth" type="number" min="640" max="4096" step="2" value="2360"></label><label>延伸螢幕高度（像素）<input id="panelHeight" type="number" min="480" max="4096" step="2" value="1640"></label><p>此解析度必須先在 Windows 註冊。旋轉 iPad 時會自動交換寬高並重建 Extend。</p></div>
 <label>映射方式 <select id="mapping"><option value="preserve">保持比例（建議）</option><option value="stretch">使用整個表面（拉伸）</option></select></label>
 <label id="fpsField" hidden>影片幀率 <select id="fps"><option value="30">30 FPS</option><option value="60">60 FPS</option></select></label>
 <label id="qualityField" hidden>影片品質 <select id="quality"><option value="balanced">平衡 · 12 Mbps</option><option value="fast">省頻寬 · 4 Mbps</option><option value="high">高畫質 · 24 Mbps</option></select></label>

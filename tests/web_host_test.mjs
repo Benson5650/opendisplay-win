@@ -105,7 +105,7 @@ try {
   if(process.env.OD_TEST_MIRROR==='1'||process.env.OD_TEST_EXTEND==='1') {
     const extend=process.env.OD_TEST_EXTEND==='1';
     ws.send({type:'start',mode:extend?'extend':'mirror',fingerMode:'trackpad',trackpadSensitivity:'normal',quality:process.env.OD_TEST_QUALITY||'balanced',panelWidth:2360,panelHeight:1640,fps:30,target:extend?'':displays[0].id,width:1000,height:750,mapping:'preserve'});
-    const mirrored=await ws.next(m=>m.type==='started');
+    let mirrored=await ws.next(m=>m.type==='started');
     check(mirrored.generation>0&&mirrored.videoTicket,'mirror started with ticket');
     keepalive=setInterval(()=>ws.send({type:'heartbeat',generation:mirrored.generation}),500);
     await assert.rejects(connect(origin.replace('https','wss')+'/video?ticket=wrong',{Origin:origin,Cookie:authCookie}));checks++;
@@ -117,6 +117,16 @@ try {
     let frame=parsePacket(bytes.buffer.slice(bytes.byteOffset,bytes.byteOffset+bytes.length),mirrored.generation);
     check(frame?.key&&codecFromAnnexB(frame.data),'first frame is decodable IDR with SPS');
     check(frame.width===(extend?2360:displays[0].width)&&frame.height===(extend?1640:displays[0].height),'capture matches input target');
+    clearInterval(keepalive);video.close();video=undefined;
+    const oldGeneration=mirrored.generation;
+    ws.send({type:'start',mode:extend?'extend':'mirror',fingerMode:'trackpad',trackpadSensitivity:'normal',quality:'balanced',panelWidth:extend?1640:2360,panelHeight:extend?2360:1640,fps:30,target:extend?'':displays[0].id,width:750,height:1000,mapping:'preserve'});
+    mirrored=await ws.next(m=>m.type==='started');
+    check(mirrored.generation!==oldGeneration&&mirrored.videoTicket,'rotation rebuilds video generation');
+    keepalive=setInterval(()=>ws.send({type:'heartbeat',generation:mirrored.generation}),500);
+    video=await connect(origin.replace('https','wss')+'/video?ticket='+mirrored.videoTicket,{Origin:origin,Cookie:authCookie});
+    first=await video.next(m=>m.type==='binary');bytes=first.data;
+    frame=parsePacket(bytes.buffer.slice(bytes.byteOffset,bytes.byteOffset+bytes.length),mirrored.generation);
+    check(frame?.key&&frame.width===(extend?1640:displays[0].width)&&frame.height===(extend?2360:displays[0].height),'rotated video reconnects at expected resolution');
     await delay(750);
     ws.send({type:'trackpad',generation:mirrored.generation,sequence:1,action:'move',dx:25,dy:10});
     check((await ws.next(m=>m.type==='sample')).accepted===1,'trackpad move accepted while video streams');
