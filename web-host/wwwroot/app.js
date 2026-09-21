@@ -4,8 +4,9 @@ import {orientDimensions,pointInsideSurface,surfaceChanged} from './geometry.mjs
 import {sanitizePreferences} from './preferences.mjs';
 import {FingerController} from './finger.mjs';
 import {rememberedDisplay,sanitizeDisplayMemory} from './display-memory.mjs';
+import {dragRegion,FULL_REGION,sanitizeRegionStore} from './target-region.mjs';
 let sessionSurface,activeSession,pendingSession;
-let displayMemory={};
+let displayMemory={},regionStore={},regionDrag;
 let fingerController,lastPenAt=-Infinity;
 let videoSocket,videoReceiver,stopping=false,startInFlight=false,queuedRestartReason,resizeTimer,testMode=false;
 const $ = id => document.getElementById(id);
@@ -20,9 +21,9 @@ function updateMode() {
   $('qualityField').hidden=mode==='pen';
   $('scaleField').hidden=mode!=='mirror';
   $('penFields').hidden=mode!=='pen';
-  $('mapping').disabled=mode!=='pen';
-  if(mode!=='pen')$('mapping').value='preserve';
+  $('mapping').value=mode==='pen'?'stretch':'preserve';
   restoreTarget();
+  renderRegionEditor();
 }
 $('mode').onchange=updateMode;
 if($('identify'))$('identify').onclick=async()=>{
@@ -75,12 +76,14 @@ try {
   }
 } catch {}
 try { displayMemory=sanitizeDisplayMemory(JSON.parse(localStorage.getItem('od-last-displays')||'{}')); } catch {}
+try { regionStore=sanitizeRegionStore(JSON.parse(localStorage.getItem('od-target-regions')||'{}')); } catch {}
 updateMode();
 updateFingerMode();
 updateDebugOverlay($('showDebugLog').checked);
 function restoreTarget(){
   if(!$('target'))return;
   $('target').value=rememberedDisplay(displayMemory,$('mode').value,displays);
+  renderRegionEditor();
 }
 function saveTarget(){
   const mode=$('mode').value,id=$('target').value;
@@ -88,7 +91,50 @@ function saveTarget(){
   if(id)displayMemory[mode]=id;else delete displayMemory[mode];
   try { localStorage.setItem('od-last-displays',JSON.stringify(displayMemory)); } catch {}
 }
-$('target').onchange=saveTarget;
+function selectedDisplay(){return displays.find(display=>display.id===$('target').value);}
+function currentTargetRegion(){
+  const display=selectedDisplay();
+  return display?(regionStore[display.id]||FULL_REGION):FULL_REGION;
+}
+function saveRegions(){
+  try { localStorage.setItem('od-target-regions',JSON.stringify(regionStore)); } catch {}
+}
+function renderRegionEditor(){
+  const editor=$('regionEditor'),rect=$('regionRect'),empty=$('regionEmpty'),display=selectedDisplay();
+  if(!editor||!rect)return;
+  editor.classList.toggle('disabled',!display);rect.hidden=!display;empty.hidden=!!display;
+  if(!display){$('regionReadout').textContent='請先選擇 Windows 螢幕';return;}
+  editor.style.aspectRatio=`${display.width} / ${display.height}`;
+  const region=currentTargetRegion();
+  Object.assign(rect.style,{left:`${region.x*100}%`,top:`${region.y*100}%`,width:`${region.width*100}%`,height:`${region.height*100}%`});
+  $('regionReadout').textContent=`X ${Math.round(region.x*100)}% · Y ${Math.round(region.y*100)}% · 寬 ${Math.round(region.width*100)}% · 高 ${Math.round(region.height*100)}%`;
+}
+$('regionReset').onclick=()=>{
+  const display=selectedDisplay();if(!display)return;
+  regionStore[display.id]={...FULL_REGION};saveRegions();renderRegionEditor();
+};
+const regionEditor=$('regionEditor');
+regionEditor.addEventListener('pointerdown',e=>{
+  const display=selectedDisplay(),body=e.target.closest?.('#regionRect');
+  if(!display||!body)return;
+  e.preventDefault();
+  const bounds=regionEditor.getBoundingClientRect();
+  regionDrag={pointerId:e.pointerId,displayId:display.id,action:e.target.dataset.handle||'move',startX:e.clientX,startY:e.clientY,start:{...currentTargetRegion()},width:bounds.width,height:bounds.height};
+  regionEditor.setPointerCapture(e.pointerId);
+});
+regionEditor.addEventListener('pointermove',e=>{
+  if(!regionDrag||regionDrag.pointerId!==e.pointerId)return;
+  e.preventDefault();
+  regionStore[regionDrag.displayId]=dragRegion(regionDrag.start,regionDrag.action,(e.clientX-regionDrag.startX)/regionDrag.width,(e.clientY-regionDrag.startY)/regionDrag.height);
+  renderRegionEditor();
+});
+function finishRegionDrag(e){
+  if(!regionDrag||regionDrag.pointerId!==e.pointerId)return;
+  regionDrag=undefined;saveRegions();renderRegionEditor();
+}
+regionEditor.addEventListener('pointerup',finishRegionDrag);
+regionEditor.addEventListener('pointercancel',finishRegionDrag);
+$('target').onchange=()=>{saveTarget();renderRegionEditor();};
 async function post(path, value) {
   const r = await fetch(path, {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(value)});
   if (!r.ok) throw new Error(`請求失敗 (${r.status})，請檢查主機配對狀態。`);
@@ -164,21 +210,15 @@ function requestSession(reason){
   if(activeSession.mode==='extend')panel=orientDimensions(panel.width,panel.height,bounds);
   const display=activeSession.mode==='extend'?{...activeSession.display,...panel}:activeSession.display;
   const isPen = activeSession.mode === 'pen';
-  const areaScale = isPen ? (Number(activeSession.activeAreaScale) || 1.0) : 1.0;
-  let maxW = bounds.width * areaScale;
-  let maxH = bounds.height * areaScale;
-  let width = maxW, height = maxH;
-  if(activeSession.mapping==='preserve'){
-    const scale=Math.min(maxW/display.width,maxH/display.height);
+  let width=bounds.width,height=bounds.height;
+  if(!isPen&&activeSession.mapping==='preserve'){
+    const scale=Math.min(bounds.width/display.width,bounds.height/display.height);
     width=display.width*scale;height=display.height*scale;
   }
   teardownGeneration();
-  const offsetX = (bounds.width - width) / 2;
-  const offsetY = (bounds.height - height) / 2;
-  sessionSurface={width:bounds.width,height:bounds.height,offsetX,offsetY,activeWidth:width,activeHeight:height};
+  sessionSurface={width:bounds.width,height:bounds.height};
   $('surface').dataset.background=activeSession.mode==='pen'?activeSession.penBackground:'dark';
-  $('activeArea').hidden=!activeSession.showActiveArea;
-  Object.assign($('activeArea').style,{width:`${width}px`,height:`${height}px`,left:`${offsetX}px`,top:`${offsetY}px`});
+  $('activeArea').hidden=true;
   const modeName=activeSession.mode==='extend'?'Extend':activeSession.mode==='mirror'?'Mirror':'Pen Tablet';
   const resolution=activeSession.mode==='extend'?` · ${panel.width} × ${panel.height}`:'';
   $('destination').textContent=`${modeName} → ${display.name}${resolution}${testMode?' · 測試模式（不注入）':''}`;
@@ -188,14 +228,15 @@ function requestSession(reason){
   if(!send({type:'start',mode:activeSession.mode,quality:activeSession.quality,pressureCurve:activeSession.pressureCurve,
     fingerMode:activeSession.fingerMode,trackpadSensitivity:activeSession.trackpadSensitivity,
     panelWidth:panel.width,panelHeight:panel.height,fps:activeSession.fps,target:display.id,
-    width:isPen?width:bounds.width,height:isPen?height:bounds.height,mapping:isPen?'stretch':activeSession.mapping,
+    width:bounds.width,height:bounds.height,mapping:isPen?'stretch':activeSession.mapping,
+    targetRegion:isPen?activeSession.targetRegion:FULL_REGION,
     hideCursor:activeSession.hideCursor,resolutionScale:activeSession.resolutionScale}))startInFlight=false;
 }
 $('start').onclick = async () => {
   try {
     const saved={};
-    for(const key of ['mode','mapping','fps','quality','pressureCurve','trackpadSensitivity','panelWidth','panelHeight','penBackground','activeAreaScale','resolutionScale'])saved[key]=$(key).value;
-    saved.showActiveArea=$('showActiveArea').checked;saved.showHover=$('showHover').checked;saved.showDebugLog=$('showDebugLog').checked;
+    for(const key of ['mode','mapping','fps','quality','pressureCurve','trackpadSensitivity','panelWidth','panelHeight','penBackground','resolutionScale'])saved[key]=$(key).value;
+    saved.showHover=$('showHover').checked;saved.showDebugLog=$('showDebugLog').checked;
     saved.hideCursor=$('hideCursor').checked;
     localStorage.setItem('od-preferences',JSON.stringify(sanitizePreferences(saved)));
   } catch {}
@@ -213,9 +254,9 @@ $('start').onclick = async () => {
   activeSession={mode,display,panelWidth,panelHeight,mapping:$('mapping').value,fps:Number($('fps').value),
     quality:$('quality').value,pressureCurve:$('pressureCurve').value,fingerMode:$('fingerMode').value,
     trackpadSensitivity:$('trackpadSensitivity').value,penBackground:$('penBackground').value,
-    activeAreaScale:Number($('activeAreaScale').value)||1,hideCursor:$('hideCursor').checked,
+    targetRegion:{...currentTargetRegion()},hideCursor:$('hideCursor').checked,
     resolutionScale:Number($('resolutionScale').value)||1,
-    showActiveArea:$('showActiveArea').checked,showHover:$('showHover').checked,showDebugLog:$('showDebugLog').checked};
+    showHover:$('showHover').checked,showDebugLog:$('showDebugLog').checked};
   updateDebugOverlay(activeSession.showDebugLog);
   $('start').disabled = true; $('tablet').hidden = false;
   document.body.classList.add('writing');
@@ -269,19 +310,13 @@ function sample(e, phase) {
   if(phase===0||phase===1){
     pressure=(typeof e.pressure==='number'&&e.pressure>0)?Math.min(1,e.pressure):0.5;
   }
-  const isPen = activeSession?.mode === 'pen';
-  const ox = isPen ? (sessionSurface?.offsetX || 0) : 0;
-  const oy = isPen ? (sessionSurface?.offsetY || 0) : 0;
-  send({type:'pen',generation,sequence:++sequence,phase,x:(e.clientX-r.left)-ox,y:(e.clientY-r.top)-oy,
+  send({type:'pen',generation,sequence:++sequence,phase,x:e.clientX-r.left,y:e.clientY-r.top,
     pressure,azimuth:az,altitude:alt});
 }
 const surface=$('surface');
 function fingerPoint(e){
   const r=surface.getBoundingClientRect();
-  const isPen = activeSession?.mode === 'pen';
-  const ox = isPen ? (sessionSurface?.offsetX || 0) : 0;
-  const oy = isPen ? (sessionSurface?.offsetY || 0) : 0;
-  return {x:(e.clientX-r.left)-ox,y:(e.clientY-r.top)-oy};
+  return {x:e.clientX-r.left,y:e.clientY-r.top};
 }
 function updateHoverIndicator(e,visible){
   const indicator=$('hoverIndicator');

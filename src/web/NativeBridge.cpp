@@ -110,6 +110,17 @@ API uint64_t od_start(void* handle, const wchar_t* id, double width, double heig
             od::web::Mapping::PreserveAspect, od::web::PenTabletSession::Clock::now()) ? b.session.Generation() : 0;
     } catch (...) { return 0; }
 }
+API uint64_t od_start_region(void* handle, const wchar_t* id, double width, double height, int stretch,
+                             double x, double y, double regionWidth, double regionHeight) noexcept
+{
+    if (!handle || !id) return 0;
+    try {
+        auto& b = *static_cast<Bridge*>(handle);
+        return b.session.Start(id, {width, height}, stretch ? od::web::Mapping::Stretch :
+            od::web::Mapping::PreserveAspect, od::web::PenTabletSession::Clock::now(),
+            {x, y, regionWidth, regionHeight}) ? b.session.Generation() : 0;
+    } catch (...) { return 0; }
+}
 API int od_tick(void* handle) noexcept
 {
     if (!handle) return 0;

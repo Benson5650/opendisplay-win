@@ -237,6 +237,13 @@ app.Map("/control", async (HttpContext c) => {
                             uint bitrate = quality switch { "fast" => 4_000_000, "balanced" => 12_000_000, "high" => 24_000_000, _ => throw new JsonException("Invalid quality") };
                             if (width is <= 0 or > 16384 || height is <= 0 or > 16384 || mapping is not ("preserve" or "stretch")) throw new JsonException();
                             var target = m.GetProperty("target").GetString() ?? "";
+                            double regionX = 0, regionY = 0, regionWidth = 1, regionHeight = 1;
+                            if (mode == "pen" && m.TryGetProperty("targetRegion", out var regionValue)) {
+                                regionX = regionValue.GetProperty("x").GetDouble();
+                                regionY = regionValue.GetProperty("y").GetDouble();
+                                regionWidth = regionValue.GetProperty("width").GetDouble();
+                                regionHeight = regionValue.GetProperty("height").GetDouble();
+                            }
                             nint ownedDisplay = 0;
                             if (mode == "extend") {
                                 var panelWidth = m.GetProperty("panelWidth").GetUInt32();
@@ -253,7 +260,11 @@ app.Map("/control", async (HttpContext c) => {
                             Native.od_set_cursor_feedback(native, hideCursor ? 0 : 1);
                             var resolutionScale = m.TryGetProperty("resolutionScale", out var scaleVal) ? scaleVal.GetDouble() : 1.0;
                             try {
-                            var generation = Native.od_start(native, target, width, height, mapping == "stretch" ? 1 : 0);
+                            // Pen Tablet always uses the complete iPad surface. Its optional
+                            // region selects the Windows destination, not a smaller iPad area.
+                            var generation = Native.od_start_region(native, target, width, height,
+                                mode == "pen" || mapping == "stretch" ? 1 : 0,
+                                regionX, regionY, regionWidth, regionHeight);
                             if (generation != 0 && mode != "pen") {
                                 video = new VideoSession(target, fps, generation, c.Request.Cookies["od-device"]!, ownedDisplay, bitrate, resolutionScale);
                                 ownedDisplay = 0;

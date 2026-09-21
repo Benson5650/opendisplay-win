@@ -26,9 +26,9 @@ try {
   check(r?.status===200,'trusted TLS and static shell');
   const shell=await r.text();
   check(shell.includes('Pen Tablet'),'page content');
-  check(shell.includes('penBackground')&&shell.includes('showActiveArea'),'pen tablet appearance controls');
+  check(shell.includes('penBackground')&&shell.includes('regionEditor'),'pen tablet appearance and Windows target-region controls');
   check(shell.includes('showHover')&&shell.includes('hoverIndicator'),'Apple Pencil hover controls');
-  check(shell.includes('activeAreaScale')&&shell.includes('hideCursor')&&shell.includes('resolutionScale'),'priority feature controls');
+  check(!shell.includes('activeAreaScale')&&shell.includes('hideCursor')&&shell.includes('resolutionScale'),'full iPad surface and priority feature controls');
   const style=await (await fetch(origin+'/style.css')).text();
   check(style.includes('100svh')&&!style.includes('100dvh'),'stable iPad viewport does not resize on Safari toolbar changes');
   check((await fetch(origin+'/displays')).status===401,'display enumeration requires auth');
@@ -55,7 +55,9 @@ try {
   await assert.rejects(connect(origin.replace('https','wss')+'/control',{Origin:origin,Cookie:authCookie}));checks++;
   ws.send({type:'start',target:'',width:1000,height:750,mapping:'preserve'});
   check((await ws.next(m=>m.type==='started')).generation===0,'target mandatory');
-  ws.send({type:'start',target:displays[0].id,width:1000,height:750,mapping:'preserve'});
+  ws.send({type:'start',mode:'pen',target:displays[0].id,width:1000,height:750,mapping:'stretch',targetRegion:{x:.8,y:0,width:.3,height:1}});
+  check((await ws.next(m=>m.type==='started')).generation===0,'invalid Windows target region rejected');
+  ws.send({type:'start',mode:'pen',target:displays[0].id,width:1000,height:750,mapping:'stretch',targetRegion:{x:.25,y:.1,width:.5,height:.8}});
   let started=await ws.next(m=>m.type==='started');check(started.generation>0,'session start');
   let event={type:'pen',generation:started.generation,sequence:1,phase:0,x:500,y:375,pressure:.5,azimuth:0,altitude:1};
   ws.send(event);check((await ws.next(m=>m.type==='sample')).accepted===1,'sample reaches native core');

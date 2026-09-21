@@ -38,17 +38,19 @@ public:
     PenTabletSession(const PenTabletSession&) = delete;
     PenTabletSession& operator=(const PenTabletSession&) = delete;
 
-    bool Start(const std::wstring& id, Size surface, Mapping mapping, Clock::time_point now)
+    bool Start(const std::wstring& id, Size surface, Mapping mapping, Clock::time_point now,
+               NormalizedRegion region = {})
     {
         Stop(); // Release old contact before changing its destination.
         if (id.empty()) return false; // Never guess the primary display.
         auto target = resolve_(id);
-        if (!target || target->id != id || target->width <= 0 || target->height <= 0 ||
+        if (!target || target->id != id || target->width <= 0 || target->height <= 0 || !ValidRegion(region) ||
             !MapPoint({surface.width / 2, surface.height / 2}, surface,
                       {double(target->width), double(target->height)}, mapping)) return false;
         target_ = *target;
         surface_ = surface;
         mapping_ = mapping;
+        region_ = region;
         lastSequence_ = 0;
         lastSeen_ = now;
         state_ = SessionState::Active;
@@ -96,7 +98,7 @@ public:
     std::optional<Point> MapInput(Point point) const
     {
         if (state_ != SessionState::Active) return std::nullopt;
-        return MapPoint(point, surface_, {double(target_.width), double(target_.height)}, mapping_);
+        return ApplyRegion(MapPoint(point, surface_, {double(target_.width), double(target_.height)}, mapping_), region_);
     }
 
     const Target& CurrentTarget() const { return target_; }
@@ -118,8 +120,8 @@ public:
         if (sample.touch != touch_) {
             release_(); down_ = false; touch_ = sample.touch;
         }
-        auto point = MapPoint(sample.position, surface_,
-                              {double(target_.width), double(target_.height)}, mapping_);
+        auto point = ApplyRegion(MapPoint(sample.position, surface_,
+            {double(target_.width), double(target_.height)}, mapping_), region_);
         if (!point) { release_(); down_ = false; return false; }
         switch (sample.phase) {
         case Phase::Down:
@@ -156,6 +158,7 @@ private:
     Target target_;
     Size surface_{};
     Mapping mapping_{};
+    NormalizedRegion region_{};
     SessionState state_ = SessionState::Idle;
     uint64_t generation_ = 0, lastSequence_ = 0;
     Clock::time_point lastSeen_{};

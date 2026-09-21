@@ -17,13 +17,14 @@ All recent priority features, Apple Pencil hover/handwriting transitions, Win32 
 - **Native C++ CTest:** `ctest --test-dir build -C Release` (100% pass)
 - **Frontend Unit Tests (Node.js):**
   - `tests/display_memory_test.mjs` (8 checks pass)
+  - `tests/target_region_test.mjs` (15 checks pass)
   - `tests/geometry_test.mjs` (13 checks pass)
   - `tests/preferences_test.mjs` (9 checks pass)
   - `tests/finger_gestures_test.mjs` (all touch/trackpad/jitter checks pass)
   - `tests/video_packet_test.mjs` (9 checks pass)
   - `tests/video_receiver_test.mjs` (lifecycle & IDR recovery pass)
 - **End-to-End Integration Tests:**
-  - `tests/web_host_test.mjs` (47/47 HTTPS, WSS, TLS, auth, pairing, dry-run input tests pass)
+  - `tests/web_host_test.mjs` (48 base / 61 Mirror / 62 Extend checks pass)
 
 ---
 
@@ -40,10 +41,10 @@ All recent priority features, Apple Pencil hover/handwriting transitions, Win32 
 - **Web UI:** 「手寫時隱藏 Windows 系統游標」勾選框（保存在使用者本機偏好設定）。
 - **Native API:** 透過 `od_set_cursor_feedback()` 調用 Win32 `CreateSyntheticPointerDevice(PT_PEN, 1, POINTER_FEEDBACK_NONE / POINTER_FEEDBACK_DEFAULT)`，書寫時徹底消除 Windows 圓圈游標。
 
-### C. 自訂手寫映射有效區 (Custom Active Area Scale)
-- **Web UI:** 提供 100%、90%、80%、70% 下拉選單。
-- **人體工學與防誤觸：** 在 iPad `#surface` 上居中等比縮小 `#activeArea` 邊界框，外圍黑邊作為**手腕／手掌放置區（Palm Rest）**。
-- **座標映射：** 超出有效區的外圍手寫與觸控會被原生 `MapPoint` 自動拋棄，不產生飄移筆劃。
+### C. Windows 端自訂映射範圍 (Windows Target Region)
+- **iPad 永遠全表面輸入：** 不再縮小 iPad 有效區，也沒有不可寫黑邊。
+- **Web UI：** 依所選 Windows 螢幕比例顯示縮圖；拖曳矩形本體可移動，拖曳四角可縮放，最小 10%，並提供「全螢幕」重設。
+- **座標映射：** 每個 display ID 分別保存百分比矩形。Pencil 與 Direct Touch 的完整 iPad 座標投影至該 Windows 矩形；Touchpad 仍控制整個螢幕。
 
 ### D. 影像解析度縮放 (Resolution Scaling)
 - **Web UI:** Mirror 模式顯示「影片解析度縮放」（100% / 75% / 50%）。
@@ -108,6 +109,7 @@ ctest --test-dir build -C Release
 
 # 前端單元測試
 node tests/display_memory_test.mjs
+node tests/target_region_test.mjs
 node tests/geometry_test.mjs
 node tests/preferences_test.mjs
 node tests/finger_gestures_test.mjs
@@ -142,10 +144,7 @@ cd outputs/OpenDisplay-Web-Preview
 2. **筆身快捷手勢與按鈕對應（Apple Pencil Pro Squeeze / Double-Tap）**
    - **目標：** 攔截 Apple Pencil Pro 的擠壓（Squeeze）或雙擊（Double Tap）事件，自訂觸發 Windows 動作（如切換橡皮擦、呼叫調色盤）。
 
-3. **手寫有效區對齊配置（Active Area Alignment）**
-   - **目標：** 針對 80% / 70% 有效區，除了預設「置中」，增加「靠上」、「靠下」選項，讓習慣將手腕放在 iPad 下半部邊框的使用者獲得最大化的 Palm Rest。
-
-4. **休眠與斷線平滑自動復原（Auto-Reconnect & State Recovery）**
+3. **休眠與斷線平滑自動復原（Auto-Reconnect & State Recovery）**
    - **目標：** 當 iPad 螢幕暫時休眠或切換 App 重返時，自動透過輕量握手恢復 WebSocket 連線，不需手動重新整理網頁。
 
 ---

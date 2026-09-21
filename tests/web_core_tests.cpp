@@ -26,6 +26,11 @@ int main()
                    Mapping::Stretch), "NaN rejected");
     Check(!MapPoint({0, 0}, surface, {1, std::numeric_limits<double>::infinity()},
                    Mapping::PreserveAspect), "infinite size rejected");
+    auto regionCorner = ApplyRegion(Point{0,0}, {.25,.1,.5,.8});
+    auto regionFar = ApplyRegion(Point{1,1}, {.25,.1,.5,.8});
+    Check(regionCorner && regionCorner->x==.25 && regionCorner->y==.1, "region near corner");
+    Check(regionFar && regionFar->x==.75 && regionFar->y==.9, "region far corner");
+    Check(!ApplyRegion(Point{.5,.5}, {.8,0,.3,1}), "invalid region rejected");
     for(long extent : {1920L,3840L}) for(long pixel=0;pixel<extent;++pixel) {
         const auto normalized=od::NormalizeAbsoluteCoordinate(pixel-1920,-1920,extent);
         Check((static_cast<int64_t>(normalized)*extent)/65536==pixel,
@@ -113,6 +118,17 @@ int main()
     auto mappedAuxiliary = session.MapInput({500,375});
     Check(mappedAuxiliary && mappedAuxiliary->x == .5 && mappedAuxiliary->y == .5, "auxiliary shares mapping");
     Check(!session.AcceptAuxiliary(auxiliaryGeneration-1, 2, now), "old auxiliary generation rejected");
+    session.Stop();
+    Check(session.Start(L"monitor-path",surface,Mapping::Stretch,now,{.25,.1,.5,.8}), "region session start");
+    Sample regionPen{session.Generation(),1,Phase::Down,{0,0},.5,0,1,false};
+    Check(session.Handle(regionPen,now) && last.position.x==.25 && last.position.y==.1,
+          "full iPad origin maps to Windows region origin");
+    regionPen.sequence=2;regionPen.phase=Phase::Move;regionPen.position={1000,750};
+    Check(session.Handle(regionPen,now) && last.position.x==.75 && last.position.y==.9,
+          "full iPad far edge maps to Windows region far edge");
+    auto regionTouch=session.MapInput({500,375});
+    Check(regionTouch && regionTouch->x==.5 && regionTouch->y==.5,
+          "direct touch shares Windows target region");
     session.Stop();
 
     DirectTouchState contacts;

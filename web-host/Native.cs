@@ -22,6 +22,7 @@ internal static class Native
     [DllImport(Lib, CallingConvention = CallingConvention.Cdecl)] public static extern void od_destroy(nint h);
     [DllImport(Lib, CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Unicode)] public static extern int od_displays(StringBuilder b, int capacity);
     [DllImport(Lib, CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Unicode)] public static extern ulong od_start(nint h, string id, double w, double height, int stretch);
+    [DllImport(Lib, CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Unicode)] public static extern ulong od_start_region(nint h, string id, double w, double height, int stretch, double x, double y, double regionWidth, double regionHeight);
     [DllImport(Lib, CallingConvention = CallingConvention.Cdecl)] public static extern int od_tick(nint h);
     [DllImport(Lib, CallingConvention = CallingConvention.Cdecl)] public static extern void od_stop(nint h);
     [DllImport(Lib, CallingConvention = CallingConvention.Cdecl)] public static extern int od_heartbeat(nint h, ulong generation);
