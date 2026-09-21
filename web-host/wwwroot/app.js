@@ -3,6 +3,7 @@ import {VideoReceiver} from './video.mjs';
 import {orientDimensions,pointInsideSurface,surfaceChanged} from './geometry.mjs';
 import {sanitizePreferences} from './preferences.mjs';
 import {FingerController} from './finger.mjs';
+import {penTransition} from './pen-state.mjs';
 import {rememberedDisplay,sanitizeDisplayMemory} from './display-memory.mjs';
 import {dragRegionAspect,fitRegionAspect,FULL_REGION,sanitizeRegion,sanitizeRegionStore} from './target-region.mjs';
 let sessionSurface,activeSession,pendingSession;
@@ -51,6 +52,18 @@ const _dbg=document.createElement('div');
 _dbg.id='debugOverlay';
 Object.assign(_dbg.style,{position:'fixed',bottom:'0',left:'0',right:'0',maxHeight:'40vh',overflow:'auto',background:'rgba(0,0,0,.85)',color:'#0f0',font:'11px/1.4 monospace',padding:'6px 8px',zIndex:'9999',pointerEvents:'none',whiteSpace:'pre',display:'none'});
 document.body.appendChild(_dbg);const _dbgLines=[];
+const debugQueue=[];
+let lastDebugMove=0;
+function queueDebug(line){
+  if(!activeSession?.showDebugLog)return;
+  debugQueue.push(`${performance.now().toFixed(0)}ms ${line}`.slice(0,240));
+  if(debugQueue.length>100)debugQueue.shift();
+}
+function flushDebug(){
+  if(socket?.readyState!==WebSocket.OPEN||socket.bufferedAmount>8192||!debugQueue.length)return;
+  socket.send(JSON.stringify({type:'debugLog',lines:debugQueue.splice(0,10)}));
+}
+setInterval(flushDebug,500);
 function updateDebugOverlay(show){
   _dbg.style.display=show?'block':'none';
   if($('toggleLogBtn'))$('toggleLogBtn').hidden=!show;
@@ -58,10 +71,12 @@ function updateDebugOverlay(show){
 }
 function penLog(tag,e){
   const line=`${tag.padEnd(10)} id=${e.pointerId} btn=${e.buttons} p=${(e.pressure??-1).toFixed(3)} ptr=${pointer} gen=${generation} type=${e.pointerType}`;
+  queueDebug(line);
   _dbgLines.push(line);if(_dbgLines.length>30)_dbgLines.shift();
   if(_dbg.style.display!=='none'){_dbg.textContent=_dbgLines.join('\n');_dbg.scrollTop=_dbg.scrollHeight;}
 }
 function sysLog(msg){
+  queueDebug(`>>> ${msg}`);
   _dbgLines.push(`>>> ${msg}`);if(_dbgLines.length>30)_dbgLines.shift();
   if(_dbg.style.display!=='none'){_dbg.textContent=_dbgLines.join('\n');_dbg.scrollTop=_dbg.scrollHeight;}
 }
@@ -246,6 +261,7 @@ function stop(message = '已停止。可重新選擇螢幕。') {
   if(stopping)return;
   stopping=true;
   if(typeof sysLog==='function')sysLog(`STOP: ${message}`);
+  flushDebug();
   fingerController?.cancelAll();fingerController=undefined;
   if(regionEditing&&liveRegionOriginal&&activeSession){
     activeSession.targetRegion={...liveRegionOriginal};regionStore[activeSession.display.id]={...liveRegionOriginal};
@@ -335,11 +351,12 @@ $('start').onclick = async () => {
     resolutionScale:Number($('resolutionScale').value)||1,
     showHover:$('showHover').checked,showDebugLog:$('showDebugLog').checked};
   updateDebugOverlay(activeSession.showDebugLog);
+  debugQueue.length=0;
   $('start').disabled = true; $('tablet').hidden = false;
   $('editRegionBtn').hidden=mode!=='pen';
   document.body.classList.add('writing');
   const ws = new WebSocket(`${wsOrigin}/control`); socket = ws;
-  ws.onopen=()=>requestSession();
+  ws.onopen=()=>{sysLog(`session mode=${activeSession.mode} finger=${activeSession.fingerMode}`);requestSession();};
   ws.onmessage = e => {
     if (socket !== ws) return;
     const m = JSON.parse(e.data);
@@ -421,6 +438,7 @@ function updateHoverIndicator(e,visible){
   indicator.style.transform=`translate(${x}px,${y}px)`;indicator.classList.add('visible');
 }
 surface.addEventListener('pointerdown',e=>{
+  if(e.pointerType==='touch')penLog('TOUCH DOWN',e);
   if(regionEditing||e.pointerType!=='touch'||!fingerController||!generation)return;
   e.preventDefault();
   if(pointer!==null||performance.now()-lastPenAt<700)return;
@@ -462,14 +480,21 @@ surface.addEventListener('pointerdown',e=> {
 });
 surface.addEventListener('pointerenter',e=>{if(e.pointerType==='pen'){penLog('ENTER',e);if(pointer===null&&generation){e.preventDefault();sample(e,3);updateHoverIndicator(e,true);}}});
 surface.addEventListener('pointermove',e=> {
-  if(e.pointerType!=='pen')return; e.preventDefault();
-  if(pointer!==null && pointer!==e.pointerId)return;
-  if(pointer===null&&((e.buttons&1)!==0||(e.pressure??0)>0)){
-    pointer=e.pointerId;try{surface.setPointerCapture(pointer);}catch{}
-    updateHoverIndicator(e,false);sample(e,0);return;
+  if(e.pointerType!=='pen'||regionEditing||!generation)return; e.preventDefault();
+  if(performance.now()-lastDebugMove>150){lastDebugMove=performance.now();penLog('MOVE',e);}
+  const next=penTransition(pointer,e);
+  pointer=next.pointer;
+  for(const phase of next.phases){
+    if(phase===0){
+      sysLog('Pencil: recovered down');
+      try{surface.setPointerCapture(pointer);}catch{}
+    }
+    if(phase===2)sysLog('Pencil: recovered up');
+    // Only replay coalesced events within an established stroke. Crossing a
+    // contact boundary must use the newest event to avoid stale hover frames.
+    const batch=phase===1?e.getCoalescedEvents?.():null;
+    for(const point of batch?.length?batch:[e])sample(point,phase);
   }
-  const batch=e.getCoalescedEvents?.();
-  for(const point of batch?.length?batch:[e]) sample(point,pointer===e.pointerId?1:3);
   updateHoverIndicator(e,pointer===null);
 });
 surface.addEventListener('pointerup',e=>{if(e.pointerType==='pen'){penLog('UP',e);if(e.pointerId===pointer){sample(e,2);pointer=null;updateHoverIndicator(e,true);}}});

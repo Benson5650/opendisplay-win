@@ -52,6 +52,8 @@ try {
   await assert.rejects(connect(origin.replace('https','wss')+'/control',{Origin:'https://evil.example',Cookie:authCookie}));checks++;
   ws=await connect(origin.replace('https','wss')+'/control',{Origin:origin,Cookie:authCookie});
   const hello=await ws.next(m=>m.type==='hello');check(hello.dryRun,'no desktop injection');
+  ws.send({type:'debugLog',lines:['diagnostic transport smoke test']});
+  check((await ws.next(m=>m.type==='debugLog')).saved,'iPad diagnostics saved on Windows');
   await assert.rejects(connect(origin.replace('https','wss')+'/control',{Origin:origin,Cookie:authCookie}));checks++;
   ws.send({type:'start',target:'',width:1000,height:750,mapping:'preserve'});
   check((await ws.next(m=>m.type==='started')).generation===0,'target mandatory');

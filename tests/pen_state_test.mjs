@@ -1,0 +1,12 @@
+import assert from 'node:assert/strict';
+import {penTransition} from '../web-host/wwwroot/pen-state.mjs';
+const e=(pointerId,buttons,pressure)=>({pointerId,buttons,pressure});
+assert.deepEqual(penTransition(null,e(1,0,0)),{pointer:null,phases:[3]});
+assert.deepEqual(penTransition(null,e(1,1,.4)),{pointer:1,phases:[0]});
+assert.deepEqual(penTransition(1,e(1,1,.4)),{pointer:1,phases:[1]});
+assert.deepEqual(penTransition(1,e(1,0,0)),{pointer:null,phases:[2,3]});
+assert.deepEqual(penTransition(1,e(2,1,.4)),{pointer:2,phases:[4,0]});
+assert.deepEqual(penTransition(1,e(2,0,0)),{pointer:1,phases:[]});
+assert.deepEqual(penTransition(null,e(1,0,.2)),{pointer:1,phases:[0]});
+assert.deepEqual(penTransition(1,e(1,1,0)),{pointer:1,phases:[1]});
+console.log('8 Pencil transition checks passed');

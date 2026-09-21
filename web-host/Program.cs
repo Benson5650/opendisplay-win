@@ -155,6 +155,7 @@ app.Map("/control", async (HttpContext c) => {
         owner = connection;
     }
     var ownedVideos = new List<VideoSession>();
+    var clientDebug = new ClientDebugLog();
     string fingerMode = "off";
     double trackpadSensitivity = 1.25;
     bool penContact = false;
@@ -245,6 +246,9 @@ app.Map("/control", async (HttpContext c) => {
                 lock (gate) {
                     if (!Auth(c)) break;
                     switch (type) {
+                        case "debugLog":
+                            response = new { type="debugLog", saved=clientDebug.Append(m.GetProperty("lines")) };
+                            break;
                         case "start":
                             pressureCurve = m.TryGetProperty("pressureCurve", out var curveValue) ? curveValue.GetString() ?? "linear" : "linear";
                             _ = PressureCurve.Apply(0, pressureCurve);
