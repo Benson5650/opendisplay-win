@@ -9,6 +9,7 @@ let sessionSurface,activeSession,pendingSession;
 let displayMemory={},regionStore={},regionDrag;
 let regionEditing=false,liveRegion,liveRegionOriginal,liveRegionDrag,liveRegionFrame;
 let fingerController,lastPenAt=-Infinity;
+const fingerPointerIds=new Set();
 let videoSocket,videoReceiver,stopping=false,startInFlight=false,queuedRestartReason,resizeTimer,testMode=false;
 const $ = id => document.getElementById(id);
 const wsOrigin=location.origin.replace(/^http/, 'ws');
@@ -386,7 +387,7 @@ $('start').onclick = async () => {
 };
 function sample(e, phase) {
   if(regionEditing)return;
-  lastPenAt=performance.now();fingerController?.cancelAll();
+  lastPenAt=performance.now();cancelFingerPointers();
   if (!generation) return;
   const r=$('surface').getBoundingClientRect();
   let az=e.azimuthAngle, alt=e.altitudeAngle;
@@ -402,6 +403,11 @@ function sample(e, phase) {
     pressure,azimuth:az,altitude:alt});
 }
 const surface=$('surface');
+function cancelFingerPointers(){
+  fingerController?.cancelAll();
+  for(const id of fingerPointerIds)try{if(surface.hasPointerCapture(id))surface.releasePointerCapture(id);}catch{}
+  fingerPointerIds.clear();
+}
 function fingerPoint(e){
   const r=surface.getBoundingClientRect();
   return {x:e.clientX-r.left,y:e.clientY-r.top};
@@ -419,11 +425,13 @@ surface.addEventListener('pointerdown',e=>{
   e.preventDefault();
   if(pointer!==null||performance.now()-lastPenAt<700)return;
   const {x,y}=fingerPoint(e);
-  if(fingerController.down(e.pointerId,x,y,e.timeStamp))surface.setPointerCapture(e.pointerId);
+  if(fingerController.down(e.pointerId,x,y,e.timeStamp)){
+    fingerPointerIds.add(e.pointerId);try{surface.setPointerCapture(e.pointerId);}catch{}
+  }
 });
 surface.addEventListener('pointermove',e=>{if(!regionEditing&&e.pointerType==='touch'&&fingerController){const {x,y}=fingerPoint(e);fingerController.move(e.pointerId,x,y,e.timeStamp);}});
-surface.addEventListener('pointerup',e=>{if(!regionEditing&&e.pointerType==='touch'&&fingerController){const {x,y}=fingerPoint(e);fingerController.up(e.pointerId,x,y,e.timeStamp);}});
-for(const name of ['pointercancel','lostpointercapture'])surface.addEventListener(name,e=>{if(e.pointerType==='touch'&&fingerController){const {x,y}=fingerPoint(e);fingerController.up(e.pointerId,x,y,e.timeStamp,true);}});
+surface.addEventListener('pointerup',e=>{if(e.pointerType==='touch'&&fingerController){fingerPointerIds.delete(e.pointerId);if(!regionEditing){const {x,y}=fingerPoint(e);fingerController.up(e.pointerId,x,y,e.timeStamp);}}});
+for(const name of ['pointercancel','lostpointercapture'])surface.addEventListener(name,e=>{if(e.pointerType==='touch'&&fingerController){fingerPointerIds.delete(e.pointerId);const {x,y}=fingerPoint(e);fingerController.up(e.pointerId,x,y,e.timeStamp,true);}});
 // ── End diagnostics & toolbar controls ──
 $('fullscreenBtn').onclick=async()=>{
   try{
@@ -447,21 +455,27 @@ document.addEventListener('webkitfullscreenchange',syncFullscreen);
 // ── End diagnostics & toolbar controls ──
 surface.addEventListener('pointerdown',e=> {
   if(e.pointerType==='pen')penLog('DOWN',e);
-  e.preventDefault(); if(e.pointerType!=='pen'||pointer!==null||!generation)return;
+  e.preventDefault(); if(e.pointerType!=='pen'||!generation)return;
+  if(pointer!==null&&pointer!==e.pointerId){sample(e,4);pointer=null;}
+  if(pointer!==null)return;
   updateHoverIndicator(e,false);pointer=e.pointerId;try{surface.setPointerCapture(pointer);}catch{}sample(e,0);
 });
 surface.addEventListener('pointerenter',e=>{if(e.pointerType==='pen'){penLog('ENTER',e);if(pointer===null&&generation){e.preventDefault();sample(e,3);updateHoverIndicator(e,true);}}});
 surface.addEventListener('pointermove',e=> {
   if(e.pointerType!=='pen')return; e.preventDefault();
   if(pointer!==null && pointer!==e.pointerId)return;
+  if(pointer===null&&((e.buttons&1)!==0||(e.pressure??0)>0)){
+    pointer=e.pointerId;try{surface.setPointerCapture(pointer);}catch{}
+    updateHoverIndicator(e,false);sample(e,0);return;
+  }
   const batch=e.getCoalescedEvents?.();
   for(const point of batch?.length?batch:[e]) sample(point,pointer===e.pointerId?1:3);
   updateHoverIndicator(e,pointer===null);
 });
 surface.addEventListener('pointerup',e=>{if(e.pointerType==='pen'){penLog('UP',e);if(e.pointerId===pointer){sample(e,2);pointer=null;updateHoverIndicator(e,true);}}});
 surface.addEventListener('pointercancel',e=>{if(e.pointerType==='pen'){penLog('CANCEL',e);if(e.pointerId===pointer){sample(e,4);pointer=null;}updateHoverIndicator(e,false);}});
-surface.addEventListener('lostpointercapture',e=>{if(e.pointerType==='pen'){penLog('LOSTCAP',e);updateHoverIndicator(e,pointer===null);}});
-surface.addEventListener('pointerleave',e=>{if(e.pointerType==='pen'){penLog('LEAVE',e);if(pointer===null)sample(e,4);updateHoverIndicator(e,false);}});
+surface.addEventListener('lostpointercapture',e=>{if(e.pointerType==='pen'){penLog('LOSTCAP',e);if(e.pointerId===pointer){sample(e,4);pointer=null;}updateHoverIndicator(e,pointer===null);}});
+surface.addEventListener('pointerleave',e=>{if(e.pointerType==='pen'){penLog('LEAVE',e);sample(e,4);if(e.pointerId===pointer)pointer=null;updateHoverIndicator(e,false);}});
 surface.addEventListener('contextmenu',e=>e.preventDefault());
 $('stop').onclick=()=>stop(); $('refresh').onclick=()=>refresh().catch(e=>status(e.message));
 document.addEventListener('visibilitychange',()=>{if(document.hidden&&socket)stop('切到背景，已停止輸入。');});
