@@ -118,7 +118,7 @@ API uint64_t od_start_region(void* handle, const wchar_t* id, double width, doub
         auto& b = *static_cast<Bridge*>(handle);
         return b.session.Start(id, {width, height}, stretch ? od::web::Mapping::Stretch :
             od::web::Mapping::PreserveAspect, od::web::PenTabletSession::Clock::now(),
-            {x, y, regionWidth, regionHeight}) ? b.session.Generation() : 0;
+            {x, y, regionWidth, regionHeight}, stretch != 0) ? b.session.Generation() : 0;
     } catch (...) { return 0; }
 }
 API int od_tick(void* handle) noexcept

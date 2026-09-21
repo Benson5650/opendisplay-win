@@ -18,6 +18,22 @@ inline bool ValidRegion(NormalizedRegion region)
         region.x + region.width <= 1.0 && region.y + region.height <= 1.0;
 }
 
+// A normalized rectangle's physical aspect is
+// (width * target width) / (height * target height).  Therefore the desired
+// normalized aspect is surface aspect / target aspect.  Keep the requested
+// rectangle as a bounding box and center the largest matching rectangle in it.
+inline NormalizedRegion FitRegionAspect(NormalizedRegion region, double normalizedAspect)
+{
+    if (!ValidRegion(region) || !std::isfinite(normalizedAspect) || normalizedAspect <= 0)
+        return region;
+    double width = region.width;
+    double height = region.height;
+    if (width / height > normalizedAspect) width = height * normalizedAspect;
+    else height = width / normalizedAspect;
+    return {region.x + (region.width - width) / 2,
+            region.y + (region.height - height) / 2, width, height};
+}
+
 inline std::optional<Point> ApplyRegion(std::optional<Point> point, NormalizedRegion region)
 {
     if (!point || !ValidRegion(region)) return std::nullopt;

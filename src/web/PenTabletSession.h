@@ -39,7 +39,7 @@ public:
     PenTabletSession& operator=(const PenTabletSession&) = delete;
 
     bool Start(const std::wstring& id, Size surface, Mapping mapping, Clock::time_point now,
-               NormalizedRegion region = {})
+               NormalizedRegion region = {}, bool lockRegionAspect = false)
     {
         Stop(); // Release old contact before changing its destination.
         if (id.empty()) return false; // Never guess the primary display.
@@ -50,7 +50,9 @@ public:
         target_ = *target;
         surface_ = surface;
         mapping_ = mapping;
-        region_ = region;
+        region_ = lockRegionAspect ? FitRegionAspect(
+            region, (surface.width / surface.height) /
+                (double(target->width) / double(target->height))) : region;
         lastSequence_ = 0;
         lastSeen_ = now;
         state_ = SessionState::Active;

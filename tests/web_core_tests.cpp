@@ -31,6 +31,12 @@ int main()
     Check(regionCorner && regionCorner->x==.25 && regionCorner->y==.1, "region near corner");
     Check(regionFar && regionFar->x==.75 && regionFar->y==.9, "region far corner");
     Check(!ApplyRegion(Point{.5,.5}, {.8,0,.3,1}), "invalid region rejected");
+    const auto portraitFit=FitRegionAspect({},.5);
+    Check(portraitFit.x==.25 && portraitFit.y==0 && portraitFit.width==.5 && portraitFit.height==1,
+          "portrait surface is centered without stretching");
+    const auto landscapeFit=FitRegionAspect({},2);
+    Check(landscapeFit.x==0 && landscapeFit.y==.25 && landscapeFit.width==1 && landscapeFit.height==.5,
+          "landscape surface is centered without stretching");
     for(long extent : {1920L,3840L}) for(long pixel=0;pixel<extent;++pixel) {
         const auto normalized=od::NormalizeAbsoluteCoordinate(pixel-1920,-1920,extent);
         Check((static_cast<int64_t>(normalized)*extent)/65536==pixel,
@@ -129,6 +135,15 @@ int main()
     auto regionTouch=session.MapInput({500,375});
     Check(regionTouch && regionTouch->x==.5 && regionTouch->y==.5,
           "direct touch shares Windows target region");
+    session.Stop();
+    Check(session.Start(L"monitor-path",{1000,1000},Mapping::Stretch,now,{},true),
+          "aspect-locked region session start");
+    Sample lockedPen{session.Generation(),1,Phase::Down,{0,0},.5,0,1,false};
+    Check(session.Handle(lockedPen,now) && last.position.x==.1875 && last.position.y==0,
+          "square iPad is centered on widescreen target without distortion");
+    lockedPen.sequence=2;lockedPen.phase=Phase::Move;lockedPen.position={1000,1000};
+    Check(session.Handle(lockedPen,now) && last.position.x==.8125 && last.position.y==1,
+          "aspect-locked region preserves both far edges");
     session.Stop();
 
     DirectTouchState contacts;

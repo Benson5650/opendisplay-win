@@ -43,8 +43,8 @@ All recent priority features, Apple Pencil hover/handwriting transitions, Win32 
 
 ### C. Windows 端自訂映射範圍 (Windows Target Region)
 - **iPad 永遠全表面輸入：** 不再縮小 iPad 有效區，也沒有不可寫黑邊。
-- **Web UI：** 依所選 Windows 螢幕比例顯示縮圖；拖曳矩形本體可移動，拖曳四角可縮放，最小 10%，並提供「全螢幕」重設。
-- **座標映射：** 每個 display ID 分別保存百分比矩形。Pencil 與 Direct Touch 的完整 iPad 座標投影至該 Windows 矩形；Touchpad 仍控制整個螢幕。
+- **Web UI：** 依所選 Windows 螢幕比例顯示縮圖；拖曳矩形本體可移動，拖曳四角會鎖定目前 iPad 比例縮放，最小 10%，並提供「最大範圍」重設。不提供自由拉伸。
+- **座標映射：** 每個 display ID 分別保存百分比矩形。Pencil 與 Direct Touch 的完整 iPad 座標等比例投影至該 Windows 矩形；Touchpad 仍控制整個螢幕。網頁與 Native 兩層都會校正比例，避免舊客戶端造成幾何變形。
 
 ### D. 影像解析度縮放 (Resolution Scaling)
 - **Web UI:** Mirror 模式顯示「影片解析度縮放」（100% / 75% / 50%）。

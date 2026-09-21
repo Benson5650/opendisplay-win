@@ -33,3 +33,28 @@ export function dragRegion(start,action,dx,dy){
   if(action.includes('s'))bottom=clamp(bottom+dy,top+MIN_SIZE,1);
   return clean({x:left,y:top,width:right-left,height:bottom-top});
 }
+
+export function fitRegionAspect(value,normalizedAspect){
+  const region=sanitizeRegion(value)||FULL_REGION;
+  if(!Number.isFinite(normalizedAspect)||normalizedAspect<=0)return {...region};
+  let width=region.width,height=region.height;
+  if(width/height>normalizedAspect)width=height*normalizedAspect;
+  else height=width/normalizedAspect;
+  return clean({x:region.x+(region.width-width)/2,y:region.y+(region.height-height)/2,width,height});
+}
+
+export function dragRegionAspect(start,action,dx,dy,normalizedAspect){
+  if(action==='move'||!Number.isFinite(normalizedAspect)||normalizedAspect<=0)return dragRegion(start,action,dx,dy);
+  const region=sanitizeRegion(start)||FULL_REGION;
+  const free=dragRegion(region,action,dx,dy);
+  const anchorX=action.includes('w')?region.x+region.width:region.x;
+  const anchorY=action.includes('n')?region.y+region.height:region.y;
+  const maxWidth=action.includes('w')?anchorX:1-anchorX;
+  const maxHeight=action.includes('n')?anchorY:1-anchorY;
+  const limit=Math.min(maxWidth,maxHeight*normalizedAspect);
+  const minimum=Math.min(limit,Math.max(MIN_SIZE,MIN_SIZE*normalizedAspect));
+  const widthDriven=Math.abs(free.width-region.width)>=Math.abs(free.height-region.height)*normalizedAspect;
+  const desired=widthDriven?free.width:free.height*normalizedAspect;
+  const width=clamp(desired,minimum,limit),height=width/normalizedAspect;
+  return clean({x:action.includes('w')?anchorX-width:anchorX,y:action.includes('n')?anchorY-height:anchorY,width,height});
+}

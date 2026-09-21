@@ -4,7 +4,7 @@ import {orientDimensions,pointInsideSurface,surfaceChanged} from './geometry.mjs
 import {sanitizePreferences} from './preferences.mjs';
 import {FingerController} from './finger.mjs';
 import {rememberedDisplay,sanitizeDisplayMemory} from './display-memory.mjs';
-import {dragRegion,FULL_REGION,sanitizeRegionStore} from './target-region.mjs';
+import {dragRegionAspect,fitRegionAspect,FULL_REGION,sanitizeRegionStore} from './target-region.mjs';
 let sessionSurface,activeSession,pendingSession;
 let displayMemory={},regionStore={},regionDrag;
 let fingerController,lastPenAt=-Infinity;
@@ -92,9 +92,12 @@ function saveTarget(){
   try { localStorage.setItem('od-last-displays',JSON.stringify(displayMemory)); } catch {}
 }
 function selectedDisplay(){return displays.find(display=>display.id===$('target').value);}
+function regionAspect(display,bounds={width:window.innerWidth,height:window.innerHeight}){
+  return (bounds.width/bounds.height)/(display.width/display.height);
+}
 function currentTargetRegion(){
   const display=selectedDisplay();
-  return display?(regionStore[display.id]||FULL_REGION):FULL_REGION;
+  return display?fitRegionAspect(regionStore[display.id]||FULL_REGION,regionAspect(display)):FULL_REGION;
 }
 function saveRegions(){
   try { localStorage.setItem('od-target-regions',JSON.stringify(regionStore)); } catch {}
@@ -111,7 +114,7 @@ function renderRegionEditor(){
 }
 $('regionReset').onclick=()=>{
   const display=selectedDisplay();if(!display)return;
-  regionStore[display.id]={...FULL_REGION};saveRegions();renderRegionEditor();
+  regionStore[display.id]=fitRegionAspect(FULL_REGION,regionAspect(display));saveRegions();renderRegionEditor();
 };
 const regionEditor=$('regionEditor');
 regionEditor.addEventListener('pointerdown',e=>{
@@ -125,7 +128,8 @@ regionEditor.addEventListener('pointerdown',e=>{
 regionEditor.addEventListener('pointermove',e=>{
   if(!regionDrag||regionDrag.pointerId!==e.pointerId)return;
   e.preventDefault();
-  regionStore[regionDrag.displayId]=dragRegion(regionDrag.start,regionDrag.action,(e.clientX-regionDrag.startX)/regionDrag.width,(e.clientY-regionDrag.startY)/regionDrag.height);
+  const display=displays.find(item=>item.id===regionDrag.displayId);
+  regionStore[regionDrag.displayId]=dragRegionAspect(regionDrag.start,regionDrag.action,(e.clientX-regionDrag.startX)/regionDrag.width,(e.clientY-regionDrag.startY)/regionDrag.height,regionAspect(display));
   renderRegionEditor();
 });
 function finishRegionDrag(e){
@@ -210,6 +214,7 @@ function requestSession(reason){
   if(activeSession.mode==='extend')panel=orientDimensions(panel.width,panel.height,bounds);
   const display=activeSession.mode==='extend'?{...activeSession.display,...panel}:activeSession.display;
   const isPen = activeSession.mode === 'pen';
+  const targetRegion=isPen?fitRegionAspect(activeSession.targetRegion,regionAspect(display,bounds)):FULL_REGION;
   let width=bounds.width,height=bounds.height;
   if(!isPen&&activeSession.mapping==='preserve'){
     const scale=Math.min(bounds.width/display.width,bounds.height/display.height);
@@ -229,7 +234,7 @@ function requestSession(reason){
     fingerMode:activeSession.fingerMode,trackpadSensitivity:activeSession.trackpadSensitivity,
     panelWidth:panel.width,panelHeight:panel.height,fps:activeSession.fps,target:display.id,
     width:bounds.width,height:bounds.height,mapping:isPen?'stretch':activeSession.mapping,
-    targetRegion:isPen?activeSession.targetRegion:FULL_REGION,
+    targetRegion,
     hideCursor:activeSession.hideCursor,resolutionScale:activeSession.resolutionScale}))startInFlight=false;
 }
 $('start').onclick = async () => {
