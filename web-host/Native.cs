@@ -14,6 +14,11 @@ internal static class Native
     [DllImport(Lib, CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Unicode)] public static extern nint od_video_create(string id, uint fps, uint bitrate, double scale = 1.0);
     [DllImport(Lib, CallingConvention = CallingConvention.Cdecl)] public static extern void od_set_cursor_feedback(nint h, int showCursor);
     [DllImport(Lib, CallingConvention = CallingConvention.Cdecl)] public static extern int od_identify_displays();
+    [DllImport(Lib, CallingConvention = CallingConvention.Cdecl)] public static extern int od_set_region(nint h, ulong generation, double x, double y, double width, double height);
+    [DllImport(Lib, CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Unicode)] public static extern int od_region_edit_begin(nint h, string id, double surfaceWidth, double surfaceHeight, double x, double y, double width, double height);
+    [DllImport(Lib, CallingConvention = CallingConvention.Cdecl)] public static extern int od_region_edit_update(nint h, double x, double y, double width, double height);
+    [DllImport(Lib, CallingConvention = CallingConvention.Cdecl)] public static extern int od_region_edit_poll(nint h, out double x, out double y, out double width, out double height);
+    [DllImport(Lib, CallingConvention = CallingConvention.Cdecl)] public static extern void od_region_edit_end(nint h, int commit);
     [DllImport(Lib, CallingConvention = CallingConvention.Cdecl)] public static extern void od_video_destroy(nint h);
     [DllImport(Lib, CallingConvention = CallingConvention.Cdecl)] public static extern int od_video_state(nint h, out uint width, out uint height);
     [DllImport(Lib, CallingConvention = CallingConvention.Cdecl)] public static extern void od_video_keyframe(nint h);

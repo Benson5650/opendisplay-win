@@ -59,6 +59,16 @@ try {
   check((await ws.next(m=>m.type==='started')).generation===0,'invalid Windows target region rejected');
   ws.send({type:'start',mode:'pen',target:displays[0].id,width:1000,height:750,mapping:'stretch',targetRegion:{x:.25,y:.1,width:.5,height:.8}});
   let started=await ws.next(m=>m.type==='started');check(started.generation>0,'session start');
+  ws.send({type:'regionEditBegin',generation:started.generation});
+  check((await ws.next(m=>m.type==='regionChanged')).state==='active','live region editor starts without session restart');
+  ws.send({type:'pen',generation:started.generation,sequence:1,phase:0,x:500,y:375,pressure:.5,azimuth:0,altitude:1});
+  check((await ws.next(m=>m.type==='sample')).accepted===0,'input paused while region editor is active');
+  ws.send({type:'regionEditUpdate',generation:started.generation,region:{x:.1,y:.2,width:.5,height:.6}});
+  let regionChanged=await ws.next(m=>m.type==='regionChanged');
+  check(regionChanged.state==='active'&&regionChanged.region.x===.1,'iPad live region update accepted');
+  ws.send({type:'regionEditEnd',generation:started.generation,commit:false});
+  regionChanged=await ws.next(m=>m.type==='regionChanged');
+  check(regionChanged.state==='canceled'&&regionChanged.region.x===.25,'cancel restores original live region');
   let event={type:'pen',generation:started.generation,sequence:1,phase:0,x:500,y:375,pressure:.5,azimuth:0,altitude:1};
   ws.send(event);check((await ws.next(m=>m.type==='sample')).accepted===1,'sample reaches native core');
   ws.send(event);check((await ws.next(m=>m.type==='sample')).accepted===0,'duplicate rejected');

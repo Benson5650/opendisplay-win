@@ -2,6 +2,7 @@
 #include "VideoPipeline.h"
 #include "display/VirtualDisplay.h"
 #include "display/DisplayCatalog.h"
+#include "display/RegionEditor.h"
 #include "input/InputInjector.h"
 #include <cmath>
 #include <memory>
@@ -20,6 +21,7 @@ std::wstring Escape(const std::wstring& value)
 }
 struct Bridge {
     od::InputInjector injector;
+    od::RegionEditor regionEditor;
     bool dryRun;
     uint64_t emitted = 0;
     od::web::DirectTouchState dryTouches;
@@ -242,6 +244,59 @@ API int od_identify_displays() noexcept
     } catch (...) {
         return 0;
     }
+}
+
+API int od_set_region(void* handle, uint64_t generation,
+                      double x, double y, double width, double height) noexcept
+{
+    if (!handle) return 0;
+    try {
+        return static_cast<Bridge*>(handle)->session.UpdateRegion(
+            generation, {x,y,width,height}, true) ? 1 : 0;
+    } catch (...) { return 0; }
+}
+
+API int od_region_edit_begin(void* handle, const wchar_t* id, double surfaceWidth,
+                             double surfaceHeight, double x, double y,
+                             double width, double height) noexcept
+{
+    if (!handle || !id) return 0;
+    try {
+        auto& bridge=*static_cast<Bridge*>(handle);
+        if (bridge.dryRun) return od::web::ValidRegion({x,y,width,height}) ? 1 : 0;
+        return bridge.regionEditor.Begin(
+            id,{surfaceWidth,surfaceHeight},{x,y,width,height}) ? 1 : 0;
+    } catch (...) { return 0; }
+}
+
+API int od_region_edit_update(void* handle, double x, double y,
+                              double width, double height) noexcept
+{
+    if (!handle) return 0;
+    try {
+        auto& bridge=*static_cast<Bridge*>(handle);
+        if (bridge.dryRun) return od::web::ValidRegion({x,y,width,height}) ? 1 : 0;
+        return bridge.regionEditor.Update(
+            {x,y,width,height}) ? 1 : 0;
+    } catch (...) { return 0; }
+}
+
+API int od_region_edit_poll(void* handle, double* x, double* y,
+                            double* width, double* height) noexcept
+{
+    if (!handle || !x || !y || !width || !height) return 0;
+    try {
+        od::web::NormalizedRegion region;
+        const int state=static_cast<Bridge*>(handle)->regionEditor.Poll(region);
+        if (state) { *x=region.x; *y=region.y; *width=region.width; *height=region.height; }
+        return state;
+    } catch (...) { return 0; }
+}
+
+API void od_region_edit_end(void* handle, int commit) noexcept
+{
+    if (handle && !static_cast<Bridge*>(handle)->dryRun)
+        static_cast<Bridge*>(handle)->regionEditor.End(commit!=0);
 }
 
 // Video handles are owned by one authenticated control session. Creation only

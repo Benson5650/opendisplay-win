@@ -4,9 +4,10 @@ import {orientDimensions,pointInsideSurface,surfaceChanged} from './geometry.mjs
 import {sanitizePreferences} from './preferences.mjs';
 import {FingerController} from './finger.mjs';
 import {rememberedDisplay,sanitizeDisplayMemory} from './display-memory.mjs';
-import {dragRegionAspect,fitRegionAspect,FULL_REGION,sanitizeRegionStore} from './target-region.mjs';
+import {dragRegionAspect,fitRegionAspect,FULL_REGION,sanitizeRegion,sanitizeRegionStore} from './target-region.mjs';
 let sessionSurface,activeSession,pendingSession;
 let displayMemory={},regionStore={},regionDrag;
+let regionEditing=false,liveRegion,liveRegionOriginal,liveRegionDrag,liveRegionFrame;
 let fingerController,lastPenAt=-Infinity;
 let videoSocket,videoReceiver,stopping=false,startInFlight=false,queuedRestartReason,resizeTimer,testMode=false;
 const $ = id => document.getElementById(id);
@@ -139,6 +140,72 @@ function finishRegionDrag(e){
 regionEditor.addEventListener('pointerup',finishRegionDrag);
 regionEditor.addEventListener('pointercancel',finishRegionDrag);
 $('target').onchange=()=>{saveTarget();renderRegionEditor();};
+
+function liveAspect(){
+  const display=activeSession?.display,bounds=$('surface').getBoundingClientRect();
+  return display?regionAspect(display,bounds):1;
+}
+function renderLiveRegion(){
+  if(!liveRegion||!activeSession)return;
+  const editor=$('liveRegionEditor'),rect=$('liveRegionRect'),display=activeSession.display;
+  editor.style.aspectRatio=`${display.width} / ${display.height}`;
+  Object.assign(rect.style,{left:`${liveRegion.x*100}%`,top:`${liveRegion.y*100}%`,width:`${liveRegion.width*100}%`,height:`${liveRegion.height*100}%`});
+  $('liveRegionReadout').textContent=`X ${Math.round(liveRegion.x*100)}% · Y ${Math.round(liveRegion.y*100)}% · 寬 ${Math.round(liveRegion.width*100)}% · 高 ${Math.round(liveRegion.height*100)}%`;
+}
+function setLiveRegion(value,sendUpdate=false){
+  const clean=sanitizeRegion(value);if(!clean||!activeSession)return;
+  liveRegion=fitRegionAspect(clean,liveAspect());
+  activeSession.targetRegion={...liveRegion};
+  regionStore[activeSession.display.id]={...liveRegion};
+  renderLiveRegion();
+  if(sendUpdate&&!liveRegionFrame)liveRegionFrame=requestAnimationFrame(()=>{
+    liveRegionFrame=undefined;
+    if(regionEditing&&generation)send({type:'regionEditUpdate',generation,region:liveRegion});
+  });
+}
+function closeLiveRegion(){
+  regionEditing=false;liveRegionDrag=undefined;
+  if(liveRegionFrame)cancelAnimationFrame(liveRegionFrame);liveRegionFrame=undefined;
+  $('liveRegionPanel').hidden=true;
+}
+function beginLiveRegion(){
+  if(regionEditing||activeSession?.mode!=='pen'||!generation)return;
+  fingerController?.cancelAll();
+  liveRegionOriginal={...activeSession.targetRegion};
+  liveRegion={...activeSession.targetRegion};
+  regionEditing=true;$('liveRegionPanel').hidden=false;renderLiveRegion();
+  send({type:'regionEditBegin',generation});
+}
+$('editRegionBtn').onclick=beginLiveRegion;
+$('liveRegionReset').onclick=()=>setLiveRegion(FULL_REGION,true);
+function flushLiveRegion(){
+  if(liveRegionFrame){cancelAnimationFrame(liveRegionFrame);liveRegionFrame=undefined;}
+  if(regionEditing&&generation)send({type:'regionEditUpdate',generation,region:liveRegion});
+}
+$('liveRegionDone').onclick=()=>{if(regionEditing){flushLiveRegion();send({type:'regionEditEnd',generation,commit:true});}};
+$('liveRegionCancel').onclick=()=>{
+  if(liveRegionFrame){cancelAnimationFrame(liveRegionFrame);liveRegionFrame=undefined;}
+  if(regionEditing)send({type:'regionEditEnd',generation,commit:false});
+};
+const liveRegionEditor=$('liveRegionEditor');
+liveRegionEditor.addEventListener('pointerdown',e=>{
+  const body=e.target.closest?.('#liveRegionRect');if(!regionEditing||!body)return;
+  e.preventDefault();const bounds=liveRegionEditor.getBoundingClientRect();
+  liveRegionDrag={pointerId:e.pointerId,action:e.target.dataset.handle||'move',startX:e.clientX,startY:e.clientY,start:{...liveRegion},width:bounds.width,height:bounds.height};
+  liveRegionEditor.setPointerCapture(e.pointerId);
+});
+liveRegionEditor.addEventListener('pointermove',e=>{
+  if(!liveRegionDrag||liveRegionDrag.pointerId!==e.pointerId)return;
+  e.preventDefault();setLiveRegion(dragRegionAspect(liveRegionDrag.start,liveRegionDrag.action,
+    (e.clientX-liveRegionDrag.startX)/liveRegionDrag.width,(e.clientY-liveRegionDrag.startY)/liveRegionDrag.height,liveAspect()),true);
+});
+function finishLiveDrag(e){if(liveRegionDrag?.pointerId===e.pointerId)liveRegionDrag=undefined;}
+liveRegionEditor.addEventListener('pointerup',finishLiveDrag);
+liveRegionEditor.addEventListener('pointercancel',finishLiveDrag);
+$('liveRegionPanel').addEventListener('pointerdown',e=>e.stopPropagation());
+$('liveRegionPanel').addEventListener('pointermove',e=>e.stopPropagation());
+$('liveRegionPanel').addEventListener('pointerup',e=>e.stopPropagation());
+$('liveRegionPanel').addEventListener('pointercancel',e=>e.stopPropagation());
 async function post(path, value) {
   const r = await fetch(path, {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(value)});
   if (!r.ok) throw new Error(`請求失敗 (${r.status})，請檢查主機配對狀態。`);
@@ -179,6 +246,10 @@ function stop(message = '已停止。可重新選擇螢幕。') {
   stopping=true;
   if(typeof sysLog==='function')sysLog(`STOP: ${message}`);
   fingerController?.cancelAll();fingerController=undefined;
+  if(regionEditing&&liveRegionOriginal&&activeSession){
+    activeSession.targetRegion={...liveRegionOriginal};regionStore[activeSession.display.id]={...liveRegionOriginal};
+  }
+  closeLiveRegion();
   sessionSurface=undefined;activeSession=undefined;pendingSession=undefined;
   startInFlight=false;queuedRestartReason=undefined;clearTimeout(resizeTimer);
   status(message);
@@ -264,6 +335,7 @@ $('start').onclick = async () => {
     showHover:$('showHover').checked,showDebugLog:$('showDebugLog').checked};
   updateDebugOverlay(activeSession.showDebugLog);
   $('start').disabled = true; $('tablet').hidden = false;
+  $('editRegionBtn').hidden=mode!=='pen';
   document.body.classList.add('writing');
   const ws = new WebSocket(`${wsOrigin}/control`); socket = ws;
   ws.onopen=()=>requestSession();
@@ -295,6 +367,16 @@ $('start').onclick = async () => {
         vs.onclose=()=>{if(videoSocket===vs)stop('影片已中斷，輸入已停止。');};
       }
     }
+    if(m.type==='regionChanged'){
+      const next=sanitizeRegion(m.region);
+      if(next)setLiveRegion(next,false);
+      if(m.state==='committed'){
+        saveRegions();closeLiveRegion();status('有效區已更新。');
+      }else if(m.state==='canceled'){
+        if(next)setLiveRegion(next,false);else if(liveRegionOriginal)setLiveRegion(liveRegionOriginal,false);
+        saveRegions();closeLiveRegion();status('已取消有效區調整。');
+      }
+    }
     if (m.type === 'state' && m.state >= 2) {if(typeof sysLog==='function')sysLog(`state=${m.state} → stop`);stop(({2:'目標螢幕消失',3:'目標螢幕位置或解析度改變',4:'控制心跳逾時'})[m.state]||`工作階段停止 (${m.state})`);}
     if (m.type === 'heartbeat' && !m.alive) {if(typeof sysLog==='function')sysLog('heartbeat dead → stop');stop('工作階段失效，請重新開始。');}
   };
@@ -303,6 +385,7 @@ $('start').onclick = async () => {
   try { wakeLock = await navigator.wakeLock?.request('screen'); } catch {}
 };
 function sample(e, phase) {
+  if(regionEditing)return;
   lastPenAt=performance.now();fingerController?.cancelAll();
   if (!generation) return;
   const r=$('surface').getBoundingClientRect();
@@ -332,14 +415,14 @@ function updateHoverIndicator(e,visible){
   indicator.style.transform=`translate(${x}px,${y}px)`;indicator.classList.add('visible');
 }
 surface.addEventListener('pointerdown',e=>{
-  if(e.pointerType!=='touch'||!fingerController||!generation)return;
+  if(regionEditing||e.pointerType!=='touch'||!fingerController||!generation)return;
   e.preventDefault();
   if(pointer!==null||performance.now()-lastPenAt<700)return;
   const {x,y}=fingerPoint(e);
   if(fingerController.down(e.pointerId,x,y,e.timeStamp))surface.setPointerCapture(e.pointerId);
 });
-surface.addEventListener('pointermove',e=>{if(e.pointerType==='touch'&&fingerController){const {x,y}=fingerPoint(e);fingerController.move(e.pointerId,x,y,e.timeStamp);}});
-surface.addEventListener('pointerup',e=>{if(e.pointerType==='touch'&&fingerController){const {x,y}=fingerPoint(e);fingerController.up(e.pointerId,x,y,e.timeStamp);}});
+surface.addEventListener('pointermove',e=>{if(!regionEditing&&e.pointerType==='touch'&&fingerController){const {x,y}=fingerPoint(e);fingerController.move(e.pointerId,x,y,e.timeStamp);}});
+surface.addEventListener('pointerup',e=>{if(!regionEditing&&e.pointerType==='touch'&&fingerController){const {x,y}=fingerPoint(e);fingerController.up(e.pointerId,x,y,e.timeStamp);}});
 for(const name of ['pointercancel','lostpointercapture'])surface.addEventListener(name,e=>{if(e.pointerType==='touch'&&fingerController){const {x,y}=fingerPoint(e);fingerController.up(e.pointerId,x,y,e.timeStamp,true);}});
 // ── End diagnostics & toolbar controls ──
 $('fullscreenBtn').onclick=async()=>{
@@ -384,6 +467,13 @@ $('stop').onclick=()=>stop(); $('refresh').onclick=()=>refresh().catch(e=>status
 document.addEventListener('visibilitychange',()=>{if(document.hidden&&socket)stop('切到背景，已停止輸入。');});
 window.addEventListener('resize',()=>{
   if(!socket||stopping)return;
+  if(regionEditing){
+    send({type:'regionEditEnd',generation,commit:false});
+    clearTimeout(resizeTimer);resizeTimer=setTimeout(()=>{
+      if(socket&&!stopping&&surfaceChanged(sessionSurface,$('surface').getBoundingClientRect()))
+        requestSession('偵測到 iPad 旋轉，正在重建工作階段。');
+    },500);return;
+  }
   clearTimeout(resizeTimer);
   resizeTimer=setTimeout(()=>{
     if(socket&&!stopping&&surfaceChanged(sessionSurface,$('surface').getBoundingClientRect()))

@@ -160,6 +160,22 @@ app.Map("/control", async (HttpContext c) => {
     bool penContact = false;
     string pressureCurve = "linear";
     long lastPenAt = long.MinValue / 2;
+    bool regionEditing = false;
+    ulong sessionGeneration = 0;
+    string sessionMode = "", sessionTarget = "";
+    double sessionWidth = 0, sessionHeight = 0;
+    (double x,double y,double width,double height) currentRegion = (0,0,1,1);
+    (double x,double y,double width,double height) originalRegion = currentRegion;
+    static (double x,double y,double width,double height) ReadRegion(JsonElement value) {
+        var region=(value.GetProperty("x").GetDouble(),value.GetProperty("y").GetDouble(),
+            value.GetProperty("width").GetDouble(),value.GetProperty("height").GetDouble());
+        if (!double.IsFinite(region.Item1)||!double.IsFinite(region.Item2)||
+            !double.IsFinite(region.Item3)||!double.IsFinite(region.Item4)||
+            region.Item1<0||region.Item2<0||region.Item3<=0||region.Item4<=0||
+            region.Item1+region.Item3>1.0000001||region.Item2+region.Item4>1.0000001)
+            throw new JsonException("Invalid target region");
+        return region;
+    }
     try {
         using var socket = await c.WebSockets.AcceptWebSocketAsync();
         using var shutdown = CancellationTokenSource.CreateLinkedTokenSource(c.RequestAborted, app.Lifetime.ApplicationStopping);
@@ -177,6 +193,7 @@ app.Map("/control", async (HttpContext c) => {
                 using var timer = new PeriodicTimer(TimeSpan.FromMilliseconds(100));
                 while (await timer.WaitForNextTickAsync(ct)) {
                     int state;
+                    object? regionEvent = null;
                     lock (gate) {
                         if (!Auth(c)) { Native.od_stop(native); CancelVideo(); shutdown.Cancel(); socket.Abort(); return; }
                         state = Native.od_tick(native);
@@ -187,11 +204,26 @@ app.Map("/control", async (HttpContext c) => {
                             shutdown.Cancel(); socket.Abort(); return;
                         }
                         if (state != 1) CancelVideo();
+                        if (state != 1 && regionEditing) {
+                            Native.od_region_edit_end(native,0); regionEditing=false;
+                        } else if (state == 1 && regionEditing) {
+                            var editState=Native.od_region_edit_poll(native,out var rx,out var ry,out var rw,out var rh);
+                            if (editState != 0) {
+                                var next=(x:rx,y:ry,width:rw,height:rh);
+                                if (editState == 3) next=originalRegion;
+                                if (Native.od_set_region(native,sessionGeneration,next.x,next.y,next.width,next.height)!=0)
+                                    currentRegion=next;
+                                if (editState is 2 or 3) regionEditing=false;
+                                regionEvent=new { type="regionChanged", state=editState switch { 2=>"committed",3=>"canceled",_=>"active" },
+                                    source="windows", region=new { currentRegion.x,currentRegion.y,currentRegion.width,currentRegion.height } };
+                            }
+                        }
                     }
                     if (state != previous) {
                         Console.Error.WriteLine($"Session state: {previous} -> {state}");
                         previous = state; await Send(new { type = "state", state });
                     }
+                    if (regionEvent != null) await Send(regionEvent);
                 }
             } catch (OperationCanceledException) {} catch (WebSocketException) { shutdown.Cancel(); }
         }, ct);
@@ -225,6 +257,7 @@ app.Map("/control", async (HttpContext c) => {
                             if (fingerMode is not ("off" or "trackpad" or "touch" or "legacy")) throw new JsonException("Invalid finger mode");
                             var sensitivityName = m.TryGetProperty("trackpadSensitivity", out var sensitivityValue) ? sensitivityValue.GetString() : "normal";
                             trackpadSensitivity = sensitivityName switch { "slow" => .75, "normal" => 1.25, "fast" => 2.0, _ => throw new JsonException("Invalid trackpad sensitivity") };
+                            Native.od_region_edit_end(native,0); regionEditing=false;
                             Native.od_stop(native); CancelVideo(); video = null;
                             var width = m.GetProperty("width").GetDouble(); var height = m.GetProperty("height").GetDouble();
                             var mapping = m.GetProperty("mapping").GetString();
@@ -239,10 +272,10 @@ app.Map("/control", async (HttpContext c) => {
                             var target = m.GetProperty("target").GetString() ?? "";
                             double regionX = 0, regionY = 0, regionWidth = 1, regionHeight = 1;
                             if (mode == "pen" && m.TryGetProperty("targetRegion", out var regionValue)) {
-                                regionX = regionValue.GetProperty("x").GetDouble();
-                                regionY = regionValue.GetProperty("y").GetDouble();
-                                regionWidth = regionValue.GetProperty("width").GetDouble();
-                                regionHeight = regionValue.GetProperty("height").GetDouble();
+                                regionX=regionValue.GetProperty("x").GetDouble();
+                                regionY=regionValue.GetProperty("y").GetDouble();
+                                regionWidth=regionValue.GetProperty("width").GetDouble();
+                                regionHeight=regionValue.GetProperty("height").GetDouble();
                             }
                             nint ownedDisplay = 0;
                             if (mode == "extend") {
@@ -265,6 +298,11 @@ app.Map("/control", async (HttpContext c) => {
                             var generation = Native.od_start_region(native, target, width, height,
                                 mode == "pen" || mapping == "stretch" ? 1 : 0,
                                 regionX, regionY, regionWidth, regionHeight);
+                            if (generation != 0) {
+                                sessionGeneration=generation; sessionMode=mode; sessionTarget=target;
+                                sessionWidth=width; sessionHeight=height;
+                                currentRegion=(regionX,regionY,regionWidth,regionHeight);
+                            }
                             if (generation != 0 && mode != "pen") {
                                 video = new VideoSession(target, fps, generation, c.Request.Cookies["od-device"]!, ownedDisplay, bitrate, resolutionScale);
                                 ownedDisplay = 0;
@@ -273,7 +311,49 @@ app.Map("/control", async (HttpContext c) => {
                             response = new { type = "started", generation, videoTicket = video?.Ticket, error = generation == 0 ? "TARGET_OR_MAPPING_INVALID" : null };
                             } finally { if (ownedDisplay != 0) Native.od_extend_destroy(ownedDisplay); }
                             break;
-                        case "stop": Native.od_stop(native); CancelVideo(); response = new { type = "stopped" }; break;
+                        case "stop": Native.od_region_edit_end(native,0); regionEditing=false; Native.od_stop(native); CancelVideo(); response = new { type = "stopped" }; break;
+                        case "regionEditBegin": {
+                            var editGeneration=m.GetProperty("generation").GetUInt64();
+                            if (sessionMode!="pen"||editGeneration!=sessionGeneration||Native.od_tick(native)!=1)
+                                throw new InvalidOperationException("Region editor requires an active Pen Tablet session");
+                            Native.od_cancel_finger(native);
+                            originalRegion=currentRegion;
+                            if (Native.od_set_region(native,sessionGeneration,currentRegion.x,currentRegion.y,currentRegion.width,currentRegion.height)==0)
+                                throw new InvalidOperationException("Region editor could not pause input");
+                            if (Native.od_region_edit_begin(native,sessionTarget,sessionWidth,sessionHeight,
+                                currentRegion.x,currentRegion.y,currentRegion.width,currentRegion.height)==0)
+                                throw new InvalidOperationException("Windows region editor unavailable");
+                            regionEditing=true;
+                            response=new { type="regionChanged",state="active",source="ipad",
+                                region=new { currentRegion.x,currentRegion.y,currentRegion.width,currentRegion.height } };
+                            break;
+                        }
+                        case "regionEditUpdate": {
+                            if (!regionEditing||m.GetProperty("generation").GetUInt64()!=sessionGeneration)
+                                throw new InvalidOperationException("Region editor is not active");
+                            var next=ReadRegion(m.GetProperty("region"));
+                            Native.od_cancel_finger(native);
+                            if (Native.od_set_region(native,sessionGeneration,next.x,next.y,next.width,next.height)==0||
+                                Native.od_region_edit_update(native,next.x,next.y,next.width,next.height)==0)
+                                throw new InvalidOperationException("Region update rejected");
+                            currentRegion=next;
+                            response=new { type="regionChanged",state="active",source="ipad",
+                                region=new { currentRegion.x,currentRegion.y,currentRegion.width,currentRegion.height } };
+                            break;
+                        }
+                        case "regionEditEnd": {
+                            if (!regionEditing||m.GetProperty("generation").GetUInt64()!=sessionGeneration)
+                                throw new InvalidOperationException("Region editor is not active");
+                            var commit=m.GetProperty("commit").GetBoolean();
+                            if (!commit) {
+                                currentRegion=originalRegion;
+                                Native.od_set_region(native,sessionGeneration,currentRegion.x,currentRegion.y,currentRegion.width,currentRegion.height);
+                            }
+                            Native.od_region_edit_end(native,commit?1:0); regionEditing=false;
+                            response=new { type="regionChanged",state=commit?"committed":"canceled",source="ipad",
+                                region=new { currentRegion.x,currentRegion.y,currentRegion.width,currentRegion.height } };
+                            break;
+                        }
                         case "keyframe":
                             if (video?.Generation == m.GetProperty("generation").GetUInt64()) video.RequestKeyFrame();
                             response = new { type = "keyframe" }; break;
@@ -281,6 +361,7 @@ app.Map("/control", async (HttpContext c) => {
                             var alive = Native.od_heartbeat(native, m.GetProperty("generation").GetUInt64());
                             response = new { type = "heartbeat", alive }; break;
                         case "pen":
+                            if (regionEditing) { response=new { type="sample",accepted=0,emitted=Native.od_emitted(native) }; break; }
                             lastPenAt = Environment.TickCount64;
                             Native.od_cancel_finger(native);
                             var ok = Native.od_sample(native, m.GetProperty("generation").GetUInt64(), m.GetProperty("sequence").GetUInt64(),
@@ -290,6 +371,7 @@ app.Map("/control", async (HttpContext c) => {
                             if (!dryRun) continue;
                             response = new { type = "sample", accepted = ok, emitted = Native.od_emitted(native) }; break;
                         case "touch":
+                            if (regionEditing) { response=new { type="sample",accepted=0,emitted=Native.od_emitted(native) }; break; }
                             var phase = m.GetProperty("phase").GetInt32();
                             var accepted = 0;
                             if (fingerMode == "legacy" && !penContact && Environment.TickCount64-lastPenAt > 700)
@@ -297,6 +379,7 @@ app.Map("/control", async (HttpContext c) => {
                             if (!dryRun) continue;
                             response = new { type="sample",accepted,emitted=Native.od_emitted(native) }; break;
                         case "trackpad":
+                            if (regionEditing) { response=new { type="sample",accepted=0,emitted=Native.od_emitted(native) }; break; }
                             var actionName = m.GetProperty("action").GetString();
                             var action = actionName switch { "move" => 0, "leftDown" => 1, "leftUp" => 2,
                                 "rightDown" => 3, "rightUp" => 4, "scroll" => 5, _ => -1 };
@@ -314,6 +397,7 @@ app.Map("/control", async (HttpContext c) => {
                             if (!dryRun) continue;
                             response = new { type="sample",accepted=trackpadAccepted,emitted=Native.od_emitted(native) }; break;
                         case "directTouch":
+                            if (regionEditing) { response=new { type="sample",accepted=0,emitted=Native.od_emitted(native) }; break; }
                             var directPhase = m.GetProperty("phase").GetInt32();
                             if (directPhase is < 0 or > 3) throw new JsonException("Invalid touch phase");
                             var directX = m.GetProperty("x").GetDouble();
@@ -342,7 +426,7 @@ app.Map("/control", async (HttpContext c) => {
             sendLock.Dispose();
         }
     } finally {
-        lock (gate) { Native.od_stop(native); CancelVideo(); video = null; owner = null; }
+        lock (gate) { Native.od_region_edit_end(native,0); Native.od_stop(native); CancelVideo(); video = null; owner = null; }
         foreach (var oldVideo in ownedVideos) oldVideo.Dispose();
     }
 });

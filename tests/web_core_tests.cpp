@@ -144,6 +144,13 @@ int main()
     lockedPen.sequence=2;lockedPen.phase=Phase::Move;lockedPen.position={1000,1000};
     Check(session.Handle(lockedPen,now) && last.position.x==.8125 && last.position.y==1,
           "aspect-locked region preserves both far edges");
+    Check(session.UpdateRegion(session.Generation(),{0,.25,1,.5},true),
+          "active region updates without restarting generation");
+    auto liveMapped=session.MapInput({0,0});
+    Check(liveMapped&&liveMapped->x==.34375&&liveMapped->y==.25,
+          "live region update remains aspect locked");
+    Check(!session.UpdateRegion(session.Generation()-1,{},true),
+          "stale generation cannot update live region");
     session.Stop();
 
     DirectTouchState contacts;

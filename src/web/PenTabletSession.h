@@ -105,6 +105,21 @@ public:
 
     const Target& CurrentTarget() const { return target_; }
 
+    bool UpdateRegion(uint64_t generation, NormalizedRegion region, bool lockAspect)
+    {
+        if (state_ != SessionState::Active || generation != generation_ || !ValidRegion(region))
+            return false;
+        if (lockAspect) region = FitRegionAspect(
+            region, (surface_.width / surface_.height) /
+                (double(target_.width) / double(target_.height)));
+        release_();
+        down_ = false;
+        region_ = region;
+        return true;
+    }
+
+    NormalizedRegion CurrentRegion() const { return region_; }
+
     bool Handle(Sample sample, Clock::time_point now)
     {
         Tick(now);
