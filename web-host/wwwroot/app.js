@@ -262,7 +262,7 @@ function stop(message = '已停止。可重新選擇螢幕。') {
   stopping=true;
   if(typeof sysLog==='function')sysLog(`STOP: ${message}`);
   flushDebug();
-  fingerController?.cancelAll();fingerController=undefined;
+  fingerController?.cancelAll();releaseFingerCaptures();fingerController=undefined;
   if(regionEditing&&liveRegionOriginal&&activeSession){
     activeSession.targetRegion={...liveRegionOriginal};regionStore[activeSession.display.id]={...liveRegionOriginal};
   }
@@ -285,7 +285,7 @@ function stop(message = '已停止。可重新選擇螢幕。') {
   $('start').disabled = false; status(message);
 }
 function teardownGeneration(){
-  fingerController?.cancelAll();fingerController=undefined;
+  fingerController?.cancelAll();releaseFingerCaptures();fingerController=undefined;
   const receiver=videoReceiver;videoReceiver=undefined;receiver?.close();
   const oldVideo=videoSocket;videoSocket=undefined;oldVideo?.close();
   document.getElementById('videoCanvas')?.remove();
@@ -404,7 +404,7 @@ $('start').onclick = async () => {
 };
 function sample(e, phase) {
   if(regionEditing)return;
-  lastPenAt=performance.now();cancelFingerPointers();
+  lastPenAt=performance.now();cancelFingerInput();
   if (!generation) return;
   const r=$('surface').getBoundingClientRect();
   let az=e.azimuthAngle, alt=e.altitudeAngle;
@@ -420,8 +420,13 @@ function sample(e, phase) {
     pressure,azimuth:az,altitude:alt});
 }
 const surface=$('surface');
-function cancelFingerPointers(){
+function cancelFingerInput(){
   fingerController?.cancelAll();
+  // Keep Safari's capture for fingers that are still physically down. Releasing
+  // it here lets the browser start a system gesture and it may stop delivering
+  // Pencil events until every finger is lifted.
+}
+function releaseFingerCaptures(){
   for(const id of fingerPointerIds)try{if(surface.hasPointerCapture(id))surface.releasePointerCapture(id);}catch{}
   fingerPointerIds.clear();
 }
@@ -441,11 +446,12 @@ surface.addEventListener('pointerdown',e=>{
   if(e.pointerType==='touch')penLog('TOUCH DOWN',e);
   if(regionEditing||e.pointerType!=='touch'||!fingerController||!generation)return;
   e.preventDefault();
+  // Capture even when finger input is disabled or Pencil currently suppresses
+  // the contact. This prevents the still-held finger becoming a Safari gesture.
+  fingerPointerIds.add(e.pointerId);try{surface.setPointerCapture(e.pointerId);}catch{}
   if(pointer!==null||performance.now()-lastPenAt<700)return;
   const {x,y}=fingerPoint(e);
-  if(fingerController.down(e.pointerId,x,y,e.timeStamp)){
-    fingerPointerIds.add(e.pointerId);try{surface.setPointerCapture(e.pointerId);}catch{}
-  }
+  fingerController.down(e.pointerId,x,y,e.timeStamp);
 });
 surface.addEventListener('pointermove',e=>{if(!regionEditing&&e.pointerType==='touch'&&fingerController){const {x,y}=fingerPoint(e);fingerController.move(e.pointerId,x,y,e.timeStamp);}});
 surface.addEventListener('pointerup',e=>{if(e.pointerType==='touch'&&fingerController){fingerPointerIds.delete(e.pointerId);if(!regionEditing){const {x,y}=fingerPoint(e);fingerController.up(e.pointerId,x,y,e.timeStamp);}}});
