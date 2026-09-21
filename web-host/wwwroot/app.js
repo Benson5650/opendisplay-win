@@ -420,6 +420,12 @@ function sample(e, phase) {
     pressure,azimuth:az,altitude:alt});
 }
 const surface=$('surface');
+// iPad Safari can still begin a system touch gesture despite touch-action:none,
+// especially while Pencil leaves and re-enters hover range. Explicitly cancel
+// the legacy touch stream from its first event so it cannot steal later Pencil
+// pointer events. Pointer events remain the source for optional finger input.
+for(const type of ['touchstart','touchmove','touchend','touchcancel'])
+  surface.addEventListener(type,e=>e.preventDefault(),{passive:false});
 function cancelFingerInput(){
   fingerController?.cancelAll();
   // Keep Safari's capture for fingers that are still physically down. Releasing
@@ -455,7 +461,15 @@ surface.addEventListener('pointerdown',e=>{
 });
 surface.addEventListener('pointermove',e=>{if(!regionEditing&&e.pointerType==='touch'&&fingerController){const {x,y}=fingerPoint(e);fingerController.move(e.pointerId,x,y,e.timeStamp);}});
 surface.addEventListener('pointerup',e=>{if(e.pointerType==='touch'&&fingerController){fingerPointerIds.delete(e.pointerId);if(!regionEditing){const {x,y}=fingerPoint(e);fingerController.up(e.pointerId,x,y,e.timeStamp);}}});
-for(const name of ['pointercancel','lostpointercapture'])surface.addEventListener(name,e=>{if(e.pointerType==='touch'&&fingerController){fingerPointerIds.delete(e.pointerId);const {x,y}=fingerPoint(e);fingerController.up(e.pointerId,x,y,e.timeStamp,true);}});
+surface.addEventListener('pointerup',e=>{if(e.pointerType==='touch')penLog('TOUCH UP',e);});
+for(const name of ['pointercancel','lostpointercapture'])surface.addEventListener(name,e=>{if(e.pointerType==='touch'&&fingerController){penLog(`TOUCH ${name==='pointercancel'?'CANCEL':'LOSTCAP'}`,e);fingerPointerIds.delete(e.pointerId);const {x,y}=fingerPoint(e);fingerController.up(e.pointerId,x,y,e.timeStamp,true);}});
+let lastOutsidePenLog=0;
+for(const type of ['pointerdown','pointermove','pointerup','pointercancel'])document.addEventListener(type,e=>{
+  if(e.pointerType!=='pen'||surface.contains(e.target)||!document.body.classList.contains('writing'))return;
+  if(type==='pointermove'&&performance.now()-lastOutsidePenLog<150)return;
+  lastOutsidePenLog=performance.now();
+  queueDebug(`OUTSIDE ${type} id=${e.pointerId} btn=${e.buttons} p=${(e.pressure??-1).toFixed(3)} target=${e.target?.id||e.target?.tagName||'unknown'}`);
+},true);
 // ── End diagnostics & toolbar controls ──
 $('fullscreenBtn').onclick=async()=>{
   try{
